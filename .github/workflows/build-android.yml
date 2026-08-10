@@ -36,9 +36,6 @@ name: Build Android APK
 on:
   push:
     branches: [master]
-    paths:
-      - "unique-youths-client/**"
-      - ".github/workflows/build-android.yml"
     paths-ignore:
       - "README.md"
       - ".gitignore"
