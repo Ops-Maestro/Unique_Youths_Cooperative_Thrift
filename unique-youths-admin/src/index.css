@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'FreeMono', 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html.dark body {
+  background-color: #020617;
+}

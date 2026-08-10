@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: unique-youths-backend
+    runtime: node
+    rootDir: unique-youths-backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health

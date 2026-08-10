@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: unique-youths-client
+    runtime: static
+    rootDir: unique-youths-client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist

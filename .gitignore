@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment files - never commit real secrets, only .env.example files
+.env
+.env.*
+!.env.example
+
+# OS / editor noise
+.DS_Store
+*.log
+
+# Android (Capacitor) - build artifacts and local Gradle state only.
+# The android/ project itself (source, manifests, icons) IS meant to be
+# committed - it's what build-android.yml checks out and compiles.
+unique-youths-client/android/app/build/
+unique-youths-client/android/build/
+unique-youths-client/android/.gradle/
+unique-youths-client/android/app/src/main/assets/public/
+unique-youths-client/android/local.properties
+unique-youths-client/android/*.keystore
+unique-youths-client/android/release.keystore

@@ -1,0 +1,130 @@
+name: Build Android APK
+
+# Builds the client web app, wraps it in the Capacitor Android shell, and
+# produces a real, installable APK - then publishes it to a GitHub Release
+# so there's a stable download link for the "Download our app" button in
+# the client UI (see present_files / DownloadApp component).
+#
+# ---------------------------------------------------------------------
+# ONE-TIME SETUP (do this once in the GitHub repo before the first run):
+# ---------------------------------------------------------------------
+# 1. Repo Settings -> Secrets and variables -> Actions -> Variables tab
+#    - Add CLIENT_APP_URL = the public URL your client app is deployed to
+#      (e.g. https://unique-youths-client.onrender.com). The APK is a
+#      WebView shell pointing at this live site - it always shows whatever
+#      is currently deployed there, no separate mobile build to keep in
+#      sync.
+#
+# 2. (Optional but recommended) To produce a properly *signed* release APK
+#    instead of a debug-signed one, add these repo Secrets:
+#      ANDROID_KEYSTORE_BASE64  - `base64 -w0 your-release-key.keystore`
+#      ANDROID_KEYSTORE_PASSWORD
+#      ANDROID_KEY_ALIAS
+#      ANDROID_KEY_PASSWORD
+#    Generate a keystore locally first if you don't have one:
+#      keytool -genkeypair -v -keystore release.keystore -alias uniqueyouths \
+#        -keyalg RSA -keysize 2048 -validity 10000
+#    Keep that keystore file somewhere safe outside git - losing it means
+#    you can never publish an update under the same app identity again.
+#
+#    Without these secrets, the workflow still runs and produces a
+#    debug-signed APK, which installs and works fine for testing/sideloading
+#    - Android will just show a generic "developer" signature instead of
+#    your own.
+# ---------------------------------------------------------------------
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "unique-youths-client/**"
+      - ".github/workflows/build-android.yml"
+    paths-ignore:
+      - "README.md"
+      - ".gitignore"
+      - "**/*md"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: unique-youths-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: unique-youths-client/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+        env:
+          CLIENT_APP_URL: ${{ vars.CLIENT_APP_URL }}
+
+      - name: Decode signing keystore (if configured)
+        id: signing
+        working-directory: unique-youths-client/android
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.has_keystore == 'true'
+        working-directory: unique-youths-client/android
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=release.keystore \
+            -Pandroid.injected.signing.store.password="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.ANDROID_KEY_PASSWORD }}"
+          mkdir -p ../../apk-output
+          cp app/build/outputs/apk/release/app-release.apk ../../apk-output/unique-youths.apk
+
+      - name: Build debug APK (no signing secrets configured)
+        if: steps.signing.outputs.has_keystore == 'false'
+        working-directory: unique-youths-client/android
+        run: |
+          echo "::warning::No ANDROID_KEYSTORE_BASE64 secret set - building a debug-signed APK instead of a release-signed one. See the comment at the top of this workflow file for how to add proper signing."
+          ./gradlew assembleDebug
+          mkdir -p ../../apk-output
+          cp app/build/outputs/apk/debug/app-debug.apk ../../apk-output/unique-youths.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unique-youths-apk
+          path: unique-youths-client/apk-output/unique-youths.apk
+
+      - name: Publish to "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-android
+          name: Latest Android build
+          body: Automatically built from the latest `main` branch. Downloaded via the "Download our app" link in the web app.
+          prerelease: true
+          files: unique-youths-client/apk-output/unique-youths.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
