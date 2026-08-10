@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
+        env:
+          BACKEND_HEALTH_URL: ${{ secrets.BACKEND_HEALTH_URL }}
         run: |
           if [ -z "${{ secrets.BACKEND_HEALTH_URL }}" ]; then
             echo "BACKEND_HEALTH_URL secret is not set - skipping."
