@@ -1,17 +1,14 @@
-import type { CapacitorConfig } from "@capacitor/cli";
+const API = (import.meta as any).env?.VITE_API_BASE_URL || "https://unique-youths-cooperative-thrift-backend.onrender.com";
 
-const config: CapacitorConfig = {
-  appId: "com.uniqueyouths.thrift",
-  appName: "Unique Youth",
-  webDir: "dist",
-  // Remove or comment out 'server' so the app loads local bundled files instantly
-  // server: {
-  //   url: LIVE_URL,
-  //   cleartext: false
-  // },
-  android: {
-    allowMixedContent: false
-  }
-};
-
-export default config;
+export async function api(path: string, options: RequestInit = {}) {
+  const r = await fetch(`${API}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.message || "Request failed");
+  return d;
+}
