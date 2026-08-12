@@ -165,9 +165,6 @@ export default function App(){
  const [slide,setSlide]=useState(0);
  const [step,setStep]=useState(0);
  const [theme,setTheme]=useTheme();
- // "register" shows the multi-step signup wizard below. "login" shows the
- // sign-in form. Both are reachable at any time from the header tabs, so a
- // returning member is never stuck on the wizard with no way to log in.
  const [mode,setMode]=useState<"register"|"login">(
    localStorage.getItem(HAS_REGISTERED_KEY)?"login":"register"
  );
@@ -191,10 +188,6 @@ export default function App(){
  const set=(k:string,v:string)=>setForm((x:any)=>({...x,[k]:v}));
  const setBank=(k:string,v:string)=>setForm((x:any)=>({...x,bank:{...x.bank,[k]:v}}));
 
- // Fully resets every piece of wizard/login state back to a clean slate.
- // Called on logout so clicking "Register" afterwards never resumes a
- // previous session's half-filled form or leftover step - no page refresh
- // needed to get a blank form.
  const resetWizard=()=>{
    setStep(0);
    setForm(BLANK_FORM);
@@ -214,8 +207,6 @@ export default function App(){
  const start=async()=>{
    try{
      setError("");
-     // Already registered and OTP already sent (e.g. they clicked Back to
-     // review their bank details, then Forward again) - don't re-register.
      if(userId){setStep(2);return}
      const d=await api("/api/auth/register",{method:"POST",body:JSON.stringify(form)});
      setUserId(d.userId);setStep(2);setMsg("Verification code sent to your email.")
@@ -225,8 +216,6 @@ export default function App(){
  const verify=async()=>{
    try{
      setError("");
-     // Already verified (e.g. they browsed Back to the OTP screen and
-     // forward again) - don't try to consume the OTP a second time.
      if(regToken){setStep(3);return}
      const d=await api("/api/auth/verify-otp",{method:"POST",body:JSON.stringify({userId,otp})});
      setRegToken(d.registrationToken);setMsg("");setStep(3)
@@ -274,7 +263,7 @@ export default function App(){
    try{
      await api("/api/auth/member/logout",{method:"POST",headers:{Authorization:`Bearer ${sessionStorage.getItem(TOKEN_KEY)}`}});
    }catch{
-     // Still log out locally even if the activity-log call fails.
+     // Still log out locally even if call fails.
    }
    sessionStorage.removeItem(TOKEN_KEY);
    setMemberToken("");
@@ -298,8 +287,6 @@ export default function App(){
      <Brand/>
      <div className="flex items-center gap-2">
        <ThemeToggle theme={theme} setTheme={setTheme}/>
-       {/* Always-visible tabs so a returning/logged-out member can reach the
-           login form without having to click through the registration wizard. */}
        <div className="flex gap-2">
          <button
            onClick={()=>{setMode("login");setError("");setMsg("")}}
@@ -323,7 +310,7 @@ export default function App(){
       <Panel title="Log in to your account">
         <Input label="Email or username" value={loginForm.usernameOrEmail} onChange={(v:string)=>setLoginForm({...loginForm,usernameOrEmail:v})}/>
         <PasswordInput label="Password" value={loginForm.password} onChange={(v:string)=>setLoginForm({...loginForm,password:v})}/>
-        <button onClick={login} className="btn">Log in</button>
+        <button onClick={login} className="w-full bg-blue-800 text-white font-semibold py-3 rounded-lg hover:bg-blue-900 transition">Log in</button>
         <div className="text-center mt-4">
           <button type="button" className="text-sm text-blue-700 dark:text-blue-300 underline" onClick={()=>setShowForgot(s=>!s)}>Forgot password?</button>
           {showForgot&&<p className="text-sm text-slate-500 dark:text-slate-300 mt-2">There's no self-service password reset yet. Contact an administrator directly (call, message, or in person) and they can reset it for you.</p>}
@@ -340,7 +327,7 @@ export default function App(){
         <PasswordInput label="Confirm password" value={confirmPassword} onChange={setConfirmPassword}/>
         <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2 mb-3">{PASSWORD_TIP}</p>
         <Input label="Residential address" value={form.residentialAddress} onChange={(v:string)=>set("residentialAddress",v)}/>
-        <button onClick={goPersonalContinue} className="btn">Continue</button>
+        <button onClick={goPersonalContinue} className="w-full bg-blue-800 text-white font-semibold py-3 rounded-lg hover:bg-blue-900 transition">Continue</button>
         <p className="text-center text-sm text-slate-500 dark:text-slate-300 mt-4">Already registered? <button type="button" className="text-blue-700 dark:text-blue-300 font-semibold underline" onClick={()=>setMode("login")}>Log in instead</button></p>
       </Panel>}
       {step===1&&<Panel title="Bank details">
@@ -377,7 +364,7 @@ export default function App(){
     </>}
    </main>
    <AppFooter/>
- </div>
+ </div>;
 }
 
 function StepNav({onBack,children}:{onBack:()=>void;children:any}){
@@ -415,22 +402,16 @@ function PasswordInput({label,value,onChange}:any){
 }
 
 const STATUS_COPY:Record<string,{title:string,text:string}> = {
-  awaiting_guarantor_review:{title:"Awaiting guarantor review",text:"An administrator is verifying your nominated guarantor. You'll be able to see your circle position once this is done."},
+  awaiting_guarantor_review:{title:"Awaiting guarantor review",text:"An administrator is verifying your guarantor. You'll be able to see your circle position once this is done."},
   awaiting_slot_assignment:{title:"Almost there!",text:"Your guarantor has been verified. An administrator will place you into a circle slot shortly."},
   rejected:{title:"Registration not approved",text:"Your guarantor could not be verified. Please contact an administrator for details."}
 };
 
-// A monospace, bold treatment for this specific status banner, per request.
-// Falls back gracefully through other monospace fonts if FreeMono isn't
-// installed on the device.
 const STATUS_FONT={fontFamily:"'FreeMono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"};
 
-function Ticker({announcements}:{announcements:any[]}){
+function Ticker({announcements}:any){
  const hasItems=announcements&&announcements.length>0;
- const text=hasItems?announcements.map(a=>a.description).join("     •     "):"No new announcements";
- // Scale the scroll duration with how much text there is, so adding more
- // announcements doesn't make everything whip by faster - it always moves
- // at roughly the same reading speed (~55px/sec).
+ const text=hasItems?announcements.map((a:any)=>a.description).join("     •     "):"No new announcements";
  const duration=Math.max(14,Math.min(90,text.length*0.19));
  return <div className="bg-slate-900 text-white overflow-hidden py-2">
    {hasItems
@@ -439,13 +420,53 @@ function Ticker({announcements}:{announcements:any[]}){
  </div>;
 }
 
+function Card({t,v}:{t:string;v:string}){
+ return <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow">
+   <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{t}</p>
+   <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{v}</p>
+ </div>;
+}
+
+function ProfilePage({dashboard,onSaved,onDone}:any){
+ const [firstName,setFirstName]=useState(dashboard?.user?.firstName||"");
+ const [lastName,setLastName]=useState(dashboard?.user?.lastName||"");
+ const [phone,setPhone]=useState(dashboard?.user?.primaryPhone||"");
+ const [msg,setMsg]=useState("");
+ const [error,setError]=useState("");
+
+ const saveProfile=async(e:any)=>{
+   e.preventDefault();
+   try{
+     setError("");
+     await api("/api/member/profile",{method:"PUT",body:JSON.stringify({firstName,lastName,primaryPhone:phone})});
+     setMsg("Profile updated successfully!");
+     onSaved?.();
+   }catch(e:any){setError(e.message)}
+ };
+
+ return <main className="max-w-4xl mx-auto p-5">
+   <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow">
+     <div className="flex justify-between items-center mb-4">
+       <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Profile Settings</h2>
+       <button onClick={onDone} className="text-sm text-blue-700 dark:text-blue-300 font-semibold underline">Back to Dashboard</button>
+     </div>
+     {msg&&<div className="p-3 mb-3 rounded bg-green-50 text-green-700">{msg}</div>}
+     {error&&<div className="p-3 mb-3 rounded bg-red-50 text-red-700">{error}</div>}
+     <form onSubmit={saveProfile} className="space-y-4">
+       <Input label="First Name" value={firstName} onChange={setFirstName}/>
+       <Input label="Last Name" value={lastName} onChange={setLastName}/>
+       <Input label="Phone Number" value={phone} onChange={setPhone}/>
+       <button type="submit" className="px-5 py-3 bg-blue-800 text-white rounded-lg font-semibold">Save Changes</button>
+     </form>
+   </div>
+ </main>;
+}
+
 function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:any){
  const [view,setView]=useState<"home"|"profile">("home");
  const [refreshing,setRefreshing]=useState(false);
  const status=dashboard?.user?.registrationStatus;
  const isActive=status==="active";
- // "Verified by the admin" = guarantor already checked, whether or not a
- // slot has been assigned yet. That's when the Profile tab unlocks.
  const isVerified=status==="awaiting_slot_assignment"||status==="active";
  const profileDone=!!dashboard?.user?.profileCompletedAt;
 
@@ -456,7 +477,6 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
 
  const paid=dashboard?.ledgers?.filter((x:any)=>x.isPaid).length||0;
  const mp=dashboard?.monthProgress;
- const circle=dashboard?.circle;
 
  return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
   <header className="bg-blue-800 text-white p-4 flex justify-between items-center gap-3 flex-wrap">
@@ -489,8 +509,6 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
        <h2 className="text-xl font-bold text-slate-900 dark:text-white">{STATUS_COPY[status]?.title||"Pending"}</h2>
        <p className="text-slate-600 dark:text-slate-200 mt-1 font-bold">
          {status==="awaiting_slot_assignment"&&profileDone
-           // Profile's already done - drop the "set up your profile" prompt
-           // entirely instead of nagging about something already finished.
            ?"Your guarantor has been verified. An administrator will place you into a circle slot shortly."
            :STATUS_COPY[status]?.text}
        </p>
@@ -506,8 +524,6 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
       <Card t="Late fine" v="₦4,000"/>
     </div>
 
-    {/* Live feed: how much of this month's ₦11,000-per-member target has
-        actually come in, updated every time the dashboard refreshes. */}
     {mp && <div className="mt-6 bg-white dark:bg-slate-900 rounded-2xl p-5 shadow">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">This month's contribution target</h2>
@@ -528,159 +544,12 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
       <h2 className="font-bold text-xl text-slate-900 dark:text-white">My payment history</h2>
       <p className="text-slate-600 dark:text-slate-300">Confirmed months: {paid}</p>
       <div className="mt-4 bg-blue-50 dark:bg-slate-800 border border-blue-100 dark:border-slate-700 rounded-lg p-4 text-sm text-slate-700 dark:text-slate-200">
-        Send your ₦11,000 to the admin's account and share your receipt in the WhatsApp community. An admin will confirm it here once it's received - it'll show up in this list automatically.
+        Send your ₦11,000 to the admin's account and share your receipt in the WhatsApp community. An admin will confirm it here once received.
       </div>
-     </section>
-
-     <section className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow">
-      <h2 className="font-bold text-xl text-slate-900 dark:text-white">Your circle</h2>
-      {circle ? <>
-        <div className="mt-3 flex items-center gap-4">
-          <div className="w-20 h-20 rounded-2xl bg-blue-800 text-white flex flex-col items-center justify-center shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-blue-200">Your number</span>
-            <span className="text-3xl font-black">{circle.myNumber ?? "—"}</span>
-          </div>
-          <div className="text-sm text-slate-600 dark:text-slate-300">
-            <p><b className="text-slate-900 dark:text-white">{circle.name}</b> · Cycle {circle.cycleNumber}</p>
-            <p className="mt-1">{circle.size} of {circle.baselineSize} slots filled — {circle.slotsRemaining} remaining.</p>
-            {circle.myDisbursed && <p className="mt-1 text-red-600 dark:text-red-400 font-semibold">You've already received your payout this cycle.</p>}
-          </div>
-        </div>
-      </> : <p className="text-slate-500 dark:text-slate-400 mt-2">Not assigned to a circle yet.</p>}
      </section>
     </div>
    </>}
   </main>}
   <AppFooter/>
- </div>
-}
-function Card({t,v}:any){return <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow"><p className="text-slate-500 dark:text-slate-300 text-sm">{t}</p><b className="text-2xl text-slate-900 dark:text-white">{v}</b></div>}
-
-const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
-
-function resizeImageFile(file:File,maxSize=320):Promise<string>{
- return new Promise((resolve,reject)=>{
-   const reader=new FileReader();
-   reader.onload=()=>{
-     const img=new Image();
-     img.onload=()=>{
-       let {width,height}=img;
-       if(width>height){if(width>maxSize){height=Math.round(height*maxSize/width);width=maxSize}}
-       else{if(height>maxSize){width=Math.round(width*maxSize/height);height=maxSize}}
-       const canvas=document.createElement("canvas");
-       canvas.width=width;canvas.height=height;
-       const ctx=canvas.getContext("2d");
-       if(!ctx){reject(new Error("Could not process image"));return}
-       ctx.drawImage(img,0,0,width,height);
-       resolve(canvas.toDataURL("image/jpeg",0.82));
-     };
-     img.onerror=()=>reject(new Error("Could not read that image"));
-     img.src=String(reader.result);
-   };
-   reader.onerror=()=>reject(new Error("Could not read that file"));
-   reader.readAsDataURL(file);
- });
-}
-
-function ProfilePage({dashboard,onSaved,onDone}:any){
- const u=dashboard?.user||{};
- const circle=dashboard?.circle;
- const [avatarPreview,setAvatarPreview]=useState<string|null>(u.avatarDataUrl||null);
- const [day,setDay]=useState(u.dateOfBirthDay?String(u.dateOfBirthDay):"");
- const [month,setMonth]=useState(u.dateOfBirthMonth?String(u.dateOfBirthMonth):"");
- const [busy,setBusy]=useState(false);
- const [msg,setMsg]=useState("");
- const [err,setErr]=useState("");
-
- const onPickFile=async(e:React.ChangeEvent<HTMLInputElement>)=>{
-   const file=e.target.files?.[0];
-   if(!file)return;
-   setErr("");
-   try{
-     const dataUrl=await resizeImageFile(file);
-     setAvatarPreview(dataUrl);
-   }catch(ex:any){setErr(ex.message)}
- };
-
- const save=async()=>{
-   setErr("");setMsg("");setBusy(true);
-   try{
-     const body:any={};
-     if(avatarPreview&&avatarPreview!==u.avatarDataUrl)body.avatarDataUrl=avatarPreview;
-     if(day)body.dateOfBirthDay=Number(day);
-     if(month)body.dateOfBirthMonth=Number(month);
-     const res=await api("/api/member/profile",{method:"PUT",headers:{Authorization:`Bearer ${sessionStorage.getItem("memberToken")}`},body:JSON.stringify(body)});
-     await onSaved?.();
-     if(res.justCompleted){
-       // Profile just went from incomplete to complete - head back to the
-       // dashboard automatically instead of leaving them stranded here.
-       onDone?.();
-     }else{
-       setMsg("Profile saved.");
-     }
-   }catch(ex:any){setErr(ex.message)}
-   finally{setBusy(false)}
- };
-
- const rows=[
-   ["Full name",`${u.firstName||""} ${u.lastName||""}`.trim()||"—"],
-   ["Residential address",u.residentialAddress||"—"],
-   ["Phone number",u.primaryPhone||"—"],
-   ["Circle number",circle?.myNumber?`Slot ${circle.myNumber}${circle.name?` · ${circle.name} (Cycle ${circle.cycleNumber})`:""}`:"Not yet assigned"],
-   ["Date of birth",u.dateOfBirthDay&&u.dateOfBirthMonth?`${u.dateOfBirthDay} ${MONTH_NAMES[u.dateOfBirthMonth-1]}`:"Not set yet"]
- ];
-
- return <main className="max-w-3xl mx-auto p-5">
-   <div className="flex items-center justify-between mb-5">
-     <h1 className="text-3xl font-black text-slate-900 dark:text-white">My Profile</h1>
-     <button type="button" onClick={()=>onDone?.()} className="text-sm font-semibold text-blue-700 dark:text-blue-300 underline">Back to dashboard</button>
-   </div>
-   {msg&&<div className="p-3 mb-3 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">{msg}</div>}
-   {err&&<div className="p-3 mb-3 rounded bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300">{err}</div>}
-
-   <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow flex items-center gap-5">
-     {avatarPreview
-       ?<img src={avatarPreview} alt="Your avatar" className="w-24 h-24 rounded-full object-cover border-4 border-blue-100 dark:border-blue-900"/>
-       :<div className="w-24 h-24 rounded-full bg-blue-800 text-white flex items-center justify-center text-3xl font-black">{(u.firstName||"?")[0]}</div>}
-     <div>
-       <label className="inline-block bg-white dark:bg-slate-800 border border-blue-700 text-blue-700 dark:text-blue-300 rounded-lg px-4 py-2 text-sm font-semibold cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-700">
-         Choose photo
-         <input type="file" accept="image/*" className="hidden" onChange={onPickFile}/>
-       </label>
-       <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">JPG or PNG. It'll be resized automatically.</p>
-     </div>
-   </div>
-
-   <div className="bg-white dark:bg-slate-900 rounded-2xl shadow mt-5 overflow-hidden overflow-x-auto">
-     <table className="w-full text-sm">
-       <tbody>
-         {rows.map(([label,value])=>(
-           <tr key={label} className="border-b dark:border-slate-700 last:border-0">
-             <td className="p-4 font-semibold text-slate-500 dark:text-slate-300 w-1/3 align-top">{label}</td>
-             <td className="p-4 text-slate-900 dark:text-white">{value}</td>
-           </tr>
-         ))}
-       </tbody>
-     </table>
-   </div>
-
-   <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow mt-5">
-     <h2 className="font-bold text-lg mb-3 text-slate-900 dark:text-white">Set your date of birth</h2>
-     <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Day and month only — no year needed.</p>
-     <div className="flex gap-3 flex-wrap">
-       <label className="block">
-         <span className="text-sm font-semibold">Day</span>
-         <input type="number" min={1} max={31} value={day} onChange={e=>setDay(e.target.value)} className="mt-1 w-24 border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3"/>
-       </label>
-       <label className="block">
-         <span className="text-sm font-semibold">Month</span>
-         <select value={month} onChange={e=>setMonth(e.target.value)} className="mt-1 border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3">
-           <option value="">Select</option>
-           {MONTH_NAMES.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
-         </select>
-       </label>
-     </div>
-     <button onClick={save} disabled={busy} className="btn mt-5 disabled:opacity-50">{busy?"Saving...":"Save profile"}</button>
-   </div>
- </main>;
+ </div>;
 }
