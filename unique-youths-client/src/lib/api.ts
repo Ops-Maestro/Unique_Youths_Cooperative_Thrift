@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 const API = import.meta.env.VITE_API_BASE_URL || "https://unique-youths-cooperative-thrift-backend.onrender.com";
 
 export async function api(path: string, options: RequestInit = {}) {

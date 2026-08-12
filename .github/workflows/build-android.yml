@@ -72,8 +72,9 @@ jobs:
 
       - name: Build web app
         run: npm run build
-        # env:
-        #   VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}
+        env:
+          VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}
+          CLIENT_APP_URL: "https://unique-youths-client.onrender.com"
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
