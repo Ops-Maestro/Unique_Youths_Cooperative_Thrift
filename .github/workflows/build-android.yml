@@ -74,7 +74,6 @@ jobs:
         run: npm run build
         env:
           VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}
-          CLIENT_APP_URL: "https://unique-youths-client.onrender.com"
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
@@ -123,7 +122,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-android
-          name: Latest Android build v0.1.0
+          name: Latest Android build
           body: Automatically built from the latest `master` branch. Downloaded via the "Download our app" link in the web app.
           prerelease: true
           files: unique-youths-client/apk-output/unique-youths.apk
