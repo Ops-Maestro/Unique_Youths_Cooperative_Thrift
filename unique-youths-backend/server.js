@@ -25,10 +25,21 @@ const allowed = () =>
 
 app.use(
   cors({
-    origin: (origin, cb) =>
-      !origin || allowed().includes(origin)
-        ? cb(null, true)
-        : cb(new Error("CORS origin not allowed"))
+    origin: (origin, cb) => {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin) return cb(null, true);
+      
+      // Check allowlist or mobile/local device schemes
+      if (
+        allowed().includes(origin) ||
+        origin.startsWith("capacitor://") ||
+        origin.startsWith("http://localhost")
+      ) {
+        return cb(null, true);
+      }
+      
+      cb(new Error("CORS origin not allowed"));
+    }
   })
 );
 
