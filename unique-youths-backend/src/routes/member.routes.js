@@ -2,6 +2,7 @@ import express from "express";
 import User from "../models/User.js";
 import Circle from "../models/Circle.js";
 import Ledger from "../models/Ledger.js";
+import LateFee from "../models/LateFee.js";
 import Announcement from "../models/Announcement.js";
 import { requireMember, requireRegistration } from "../middleware/auth.js";
 import { withExpiry } from "../utils/announcements.js";
@@ -149,6 +150,11 @@ router.get("/me", requireMember, async (req, res) => {
     };
   }
 
+  // Their own most recent late fee, if any - a separate transaction from
+  // the monthly contribution above, shown as its own card on the dashboard.
+  const lateFeeDoc = await LateFee.findOne({ user: user._id, status: { $ne: "waived" } }).sort({ createdAt: -1 });
+  const lateFee = lateFeeDoc ? { amount: lateFeeDoc.amount, status: lateFeeDoc.status, imposedAt: lateFeeDoc.createdAt, paidAt: lateFeeDoc.paidAt } : null;
+
   res.json({
     user,
     // Never expose the roster: a member only ever sees their own slot
@@ -168,6 +174,7 @@ router.get("/me", requireMember, async (req, res) => {
     } : null,
     ledgers,
     monthProgress,
+    lateFee,
     finance: {
       monthlyContribution: MONTHLY_CONTRIBUTION,
       savings: SAVINGS_AMOUNT,

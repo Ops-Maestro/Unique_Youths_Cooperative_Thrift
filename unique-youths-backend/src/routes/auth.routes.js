@@ -1,4 +1,5 @@
 import express from "express";
+import { loginLimiter, otpVerifyLimiter, otpSendLimiter } from "../middleware/rateLimit.js";
 import User from "../models/User.js";
 import Admin from "../models/Admin.js";
 import OTP from "../models/OTP.js";
@@ -8,7 +9,8 @@ import MemberActivity from "../models/MemberActivity.js";
 import { withExpiry } from "../utils/announcements.js";
 import { hashPassword, comparePassword, issueToken } from "../utils/auth.js";
 import { generateOtp, hashOtp } from "../utils/otp.js";
-import { sendOtpEmail } from "../config/email.js";
+import { sendOtpEmail, sendNewDeviceAlertEmail } from "../config/email.js";
+import { sendOtpSms } from "../config/sms.js";
 import { requireAdmin, requireMember } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -66,7 +68,10 @@ export async function bootstrapAuthorizedAdmins() {
 }
 
 /* ============================================================
- * MEMBER OTP (email only - no SMS, keeps this free-tier friendly)
+ * MEMBER OTP - email is free (Resend) and is the default. SMS (Termii)
+ * costs money per message, so it's opt-in: whichever channel the member
+ * picked at registration (see User.preferredOtpChannel) is what every
+ * subsequent code - including resends - goes through automatically.
  * ============================================================ */
 async function sendOtp(user) {
   const cooldown = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 60);
@@ -79,17 +84,23 @@ async function sendOtp(user) {
     throw error;
   }
 
+  const channel = user.preferredOtpChannel === "sms" ? "sms" : "email";
   const otp = generateOtp();
   const expiresAt = new Date(Date.now() + Number(process.env.OTP_EXPIRES_MINUTES || 10) * 60 * 1000);
 
-  await OTP.create({ user: user._id, email: user.email, otpHash: hashOtp(otp), expiresAt });
-  await sendOtpEmail({ to: user.email, otp });
+  await OTP.create({ user: user._id, email: user.email, channel, otpHash: hashOtp(otp), expiresAt });
+
+  if (channel === "sms") {
+    await sendOtpSms({ to: user.primaryPhone, otp });
+  } else {
+    await sendOtpEmail({ to: user.email, otp });
+  }
 }
 
 /* ============================================================
  * MEMBER REGISTRATION - step 1: create account + send OTP
  * ============================================================ */
-router.post("/register", async (req, res) => {
+router.post("/register", otpSendLimiter, async (req, res) => {
   try {
     const { firstName, lastName, username, email, password, primaryPhone, residentialAddress, bank } = req.body;
 
@@ -101,6 +112,8 @@ router.post("/register", async (req, res) => {
     if (password.length < 8) {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
+
+    const otpChannel = req.body.otpChannel === "sms" ? "sms" : "email";
 
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedUsername = username.trim().toLowerCase();
@@ -122,6 +135,7 @@ router.post("/register", async (req, res) => {
       primaryPhone,
       residentialAddress,
       bank,
+      preferredOtpChannel: otpChannel,
       registrationStatus: "pending_otp"
     });
 
@@ -133,8 +147,11 @@ router.post("/register", async (req, res) => {
     }
 
     return res.status(201).json({
-      message: "Registration started. Check your email for the OTP.",
-      userId: user._id
+      message: otpChannel === "sms"
+        ? "Registration started. Check your phone for the OTP."
+        : "Registration started. Check your email for the OTP.",
+      userId: user._id,
+      otpChannel
     });
   } catch (error) {
     return res.status(error.status || 500).json({ message: error.message || "Registration failed" });
@@ -145,7 +162,7 @@ router.post("/register", async (req, res) => {
  * VERIFY EMAIL OTP - step 2
  * Issues a short-lived "registration" token, NOT a member session.
  * ============================================================ */
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", otpVerifyLimiter, async (req, res) => {
   try {
     const { userId, otp } = req.body;
 
@@ -205,7 +222,7 @@ router.post("/verify-otp", async (req, res) => {
 /* ============================================================
  * RESEND OTP
  * ============================================================ */
-router.post("/resend-otp", async (req, res) => {
+router.post("/resend-otp", otpSendLimiter, async (req, res) => {
   try {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ message: "User ID is required" });
@@ -215,7 +232,11 @@ router.post("/resend-otp", async (req, res) => {
     if (user.emailVerifiedAt) return res.status(400).json({ message: "Email already verified" });
 
     await sendOtp(user);
-    return res.json({ message: "A new OTP was sent to your email" });
+    return res.json({
+      message: user.preferredOtpChannel === "sms"
+        ? "A new OTP was sent to your phone"
+        : "A new OTP was sent to your email"
+    });
   } catch (error) {
     return res.status(error.status || 500).json({ message: error.message || "Unable to resend OTP" });
   }
@@ -225,7 +246,7 @@ router.post("/resend-otp", async (req, res) => {
  * MEMBER LOGIN - email or username + password
  * Only works once registration has actually started (email verified).
  * ============================================================ */
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   try {
     const identifier = String(req.body.usernameOrEmail || req.body.username || req.body.email || "")
       .trim()
@@ -263,6 +284,36 @@ router.post("/login", async (req, res) => {
 
     const token = issueToken({ type: "member", userId: user._id });
 
+    // New-device detection: a device ID the client generates once and
+    // persists (not the session token itself). If it's not in the
+    // member's known list, this is either their very first login ever
+    // (not alarming, just record it silently) or a genuinely new device
+    // on an existing account (alert them by email + log it for admins).
+    const deviceId = String(req.body.deviceId || "").trim();
+    if (deviceId) {
+      const isKnownDevice = user.knownDeviceIds.includes(deviceId);
+      const isFirstLoginEver = user.knownDeviceIds.length === 0;
+
+      if (!isKnownDevice) {
+        await User.updateOne({ _id: user._id }, { $addToSet: { knownDeviceIds: deviceId } });
+
+        if (!isFirstLoginEver) {
+          try {
+            await sendNewDeviceAlertEmail({ to: user.email, firstName: user.firstName });
+          } catch {
+            // Don't block login just because the alert email failed to send.
+          }
+
+          await MemberActivity.create({
+            user: user._id,
+            userName: `${user.firstName} ${user.lastName}`,
+            action: "new_device_login",
+            detail: "Logged in from a device not seen before on this account - an email alert was sent to the member."
+          });
+        }
+      }
+    }
+
     // A short-lived, private "welcome back" greeting every time a member
     // logs in (not just their very first login). Clears itself out after
     // 15 minutes so it doesn't linger in the ticker.
@@ -279,9 +330,9 @@ router.post("/login", async (req, res) => {
       detail: "Logged in"
     });
 
-    // Also counts as "seen right now" - no need to wait for their first
-    // dashboard poll for the online dot to go green.
-    await User.updateOne({ _id: user._id }, { $set: { lastSeenAt: new Date() } });
+    // Marks them online for the duration of this session - stays true
+    // until they explicitly log out, not based on any activity window.
+    await User.updateOne({ _id: user._id }, { $set: { lastSeenAt: new Date(), isOnline: true } });
 
     return res.json({
       message: "Login successful",
@@ -297,7 +348,7 @@ router.post("/login", async (req, res) => {
 /* ============================================================
  * ADMIN LOGIN - only the two configured administrators
  * ============================================================ */
-router.post("/admin/login", async (req, res) => {
+router.post("/admin/login", loginLimiter, async (req, res) => {
   try {
     const identifier = String(req.body.usernameOrEmail || req.body.username || req.body.email || "")
       .trim()
@@ -391,6 +442,7 @@ router.post("/member/logout", requireMember, async (req, res) => {
     });
     if (user) {
       user.lastSeenAt = new Date(0);
+      user.isOnline = false;
       await user.save();
     }
     return res.json({ message: "Logged out" });

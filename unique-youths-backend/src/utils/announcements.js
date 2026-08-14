@@ -8,6 +8,6 @@
  * by MongoDB's TTL monitor (see the index on Announcement.expiresAt) once
  * that time passes - no cron job needed.
  */
-export function withExpiry(fields, minutes = 60) {
+export function withExpiry(fields, minutes = 5) {
   return { ...fields, expiresAt: new Date(Date.now() + minutes * 60 * 1000) };
 }

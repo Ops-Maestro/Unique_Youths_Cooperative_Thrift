@@ -5,8 +5,10 @@ import { PageHeader, Banner } from "../components/ui";
 
 type Announcement = {
   _id: string;
-  type: "payment_received" | "payment_missed" | "general_update";
+  type: "payment_received" | "payment_missed" | "general_update" | "party_banner" | "app_update";
   description: string;
+  venue?: string | null;
+  eventDate?: string | null;
   createdAt: string;
   expiresAt?: string | null;
   circle?: { name: string; cycleNumber: number } | null;
@@ -16,7 +18,9 @@ type Announcement = {
 const TYPE_STYLES: Record<Announcement["type"], string> = {
   payment_received: "text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-950",
   payment_missed: "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950",
-  general_update: "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950"
+  general_update: "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950",
+  party_banner: "text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950",
+  app_update: "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950"
 };
 
 export default function BroadcastEngine({ token, refreshKey }: { token: string; refreshKey?: number }) {
@@ -26,6 +30,8 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [venue, setVenue] = useState("");
+  const [eventDate, setEventDate] = useState("");
 
   const load = async () => {
     try {
@@ -51,10 +57,22 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
       await api("/api/admin/announcements", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ type, description })
+        body: JSON.stringify({
+          type,
+          description,
+          ...(type === "party_banner" ? { venue: venue || undefined, eventDate: eventDate || undefined } : {})
+        })
       });
       setDescription("");
-      setMsg("Announcement pushed to every member's feed. It stays until you delete it.");
+      setVenue("");
+      setEventDate("");
+      setMsg(
+        type === "party_banner"
+          ? "Party banner posted — every member will see it on their dashboard until you take it down."
+          : type === "app_update"
+          ? "App update notification pushed — members will see the update banner with your link."
+          : "Announcement pushed to every member's feed. It stays until you delete it."
+      );
       await load();
     } catch (e: any) {
       setErr(e.message);
@@ -88,7 +106,7 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm p-5 mb-6">
         <div className="flex flex-wrap gap-2 mb-3">
-          {(["general_update", "payment_received", "payment_missed"] as const).map(t => (
+          {(["general_update", "payment_received", "payment_missed", "party_banner", "app_update"] as const).map(t => (
             <button
               key={t}
               onClick={() => setType(t)}
@@ -100,9 +118,31 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
             </button>
           ))}
         </div>
+        {type === "party_banner" && (
+          <div className="grid sm:grid-cols-2 gap-3 mb-3">
+            <input
+              className="border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
+              placeholder="Venue (e.g. Community Hall, Ikeja)"
+              value={venue}
+              onChange={e => setVenue(e.target.value)}
+            />
+            <input
+              type="datetime-local"
+              className="border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
+              value={eventDate}
+              onChange={e => setEventDate(e.target.value)}
+            />
+          </div>
+        )}
         <textarea
           className="w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3 min-h-24"
-          placeholder="Write the announcement members will see..."
+          placeholder={
+            type === "party_banner"
+              ? "e.g. Our quarterly get-together is coming up! Join us to celebrate..."
+              : type === "app_update"
+              ? "e.g. Version 1.1.0 is available! Download the new APK here: https://..."
+              : "Write the announcement members will see..."
+          }
           value={description}
           onChange={e => setDescription(e.target.value)}
         />
@@ -110,11 +150,14 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
           onClick={send}
           className="mt-3 inline-flex items-center gap-2 bg-red-600 text-white px-5 py-3 rounded-lg font-semibold"
         >
-          <Megaphone size={18} /> Push to member feed
+          <Megaphone size={18} /> {type === "party_banner" ? "Post party banner" : type === "app_update" ? "Publish app update" : "Push to member feed"}
         </button>
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
-          Sent to all members' dashboards and their scrolling ticker. Stays visible until you delete it below — it
-          doesn't auto-expire like system notices (welcomes, join announcements) do.
+          {type === "party_banner"
+            ? "Shows as a dedicated banner (app logo + name) on every member's dashboard, separate from the ticker. Stays up until you take it down below."
+            : type === "app_update"
+            ? "Appears as a prominent top update banner for all members with automatic clickable link formatting for your APK URL."
+            : "Sent to all members' dashboards and their scrolling ticker. Stays visible until you delete it below — it doesn't auto-expire like system notices (welcomes, join announcements) do."}
         </p>
       </div>
 

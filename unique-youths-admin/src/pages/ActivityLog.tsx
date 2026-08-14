@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LogIn, LogOut, KeyRound, Activity } from "lucide-react";
+import { LogIn, LogOut, KeyRound, Activity, ShieldAlert, DatabaseBackup } from "lucide-react";
 import { api } from "../lib/api";
 import { PageHeader, Banner } from "../components/ui";
 
@@ -15,13 +15,16 @@ type ActivityItem = {
 const ICONS: Record<string, any> = {
   login: LogIn,
   logout: LogOut,
-  otp_resend: KeyRound
+  otp_resend: KeyRound,
+  new_device_login: ShieldAlert
 };
 
 export default function ActivityLog({ token, refreshKey }: { token: string; refreshKey?: number }) {
   const [tab, setTab] = useState<"admins" | "members">("admins");
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [err, setErr] = useState("");
+  const [backupMsg, setBackupMsg] = useState("");
+  const [backingUp, setBackingUp] = useState(false);
 
   useEffect(() => {
     const path = tab === "admins" ? "/api/admin/activity" : "/api/admin/member-activity";
@@ -30,12 +33,39 @@ export default function ActivityLog({ token, refreshKey }: { token: string; refr
       .catch(e => setErr(e.message));
   }, [token, refreshKey, tab]);
 
+  const runBackup = async () => {
+    setBackingUp(true);
+    setBackupMsg("");
+    setErr("");
+    try {
+      const data = await api("/api/admin/backup/run", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setBackupMsg(data.message);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
   return (
     <div>
-      <PageHeader
-        title="Activity Log"
-        subtitle="Who's logged in or out, and when — down to the second — for admins and members."
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <PageHeader
+          title="Activity Log"
+          subtitle="Who's logged in or out, and when — down to the second — for admins and members."
+        />
+        <button
+          onClick={runBackup}
+          disabled={backingUp}
+          className="inline-flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-lg font-semibold text-sm shrink-0 disabled:opacity-50"
+        >
+          <DatabaseBackup size={16} /> {backingUp ? "Backing up..." : "Back up now"}
+        </button>
+      </div>
+      {backupMsg && <Banner tone="success" message={backupMsg} />}
 
       <div className="flex gap-2 mb-5">
         <button

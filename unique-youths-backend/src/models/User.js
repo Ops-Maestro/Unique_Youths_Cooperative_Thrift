@@ -37,6 +37,16 @@ const userSchema = new mongoose.Schema({
   emailVerifiedAt: Date,
   rulesAcceptedAt: Date,
 
+  // Chosen once at registration (email is free via Resend; SMS costs money
+  // per message via Termii, so this is opt-in, not the default). Resend
+  // reuses whichever channel was picked here, so a member never has to
+  // choose again after their first OTP.
+  preferredOtpChannel: {
+    type: String,
+    enum: ["email", "sms"],
+    default: "email"
+  },
+
   guarantorName: String,
   guarantorPhone: String,
   guarantorVerifiedAt: Date,
@@ -56,7 +66,16 @@ const userSchema = new mongoose.Schema({
   // "Online now" is derived from this at read time (within the last ~45s),
   // not stored as a boolean - there's no separate process needed to flip it
   // back to "offline" when someone closes the tab.
-  lastSeenAt: Date
+  lastSeenAt: Date,
+  // Session-based, not a heartbeat/time-window guess: true from the moment
+  // they log in, false only once they explicitly log out. A member who
+  // just backgrounds the app or their screen locks stays "online" - that
+  // was the actual bug (a 45-second activity window meant everyone flipped
+  // to "offline" within seconds of logging in, active or not).
+  isOnline: { type: Boolean, default: false },
+  // Device IDs seen on previous successful logins - a new one triggers a
+  // "new device" email alert plus an admin-visible log entry.
+  knownDeviceIds: { type: [String], default: [] }
 }, { timestamps: true });
 
 export default mongoose.model("User", userSchema);

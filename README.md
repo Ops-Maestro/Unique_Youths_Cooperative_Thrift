@@ -230,7 +230,6 @@ npm run dev
 # Member app
 cd unique-youths-client
 npm install
-npm install --save-dev @types/react @types/react-dom
 npm run dev
 
 # Admin app

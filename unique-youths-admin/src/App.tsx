@@ -262,6 +262,7 @@ function Auth({
   theme: Theme;
   setTheme: (t: Theme) => void;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
   return (
     <div className="min-h-screen bg-[#0f2557] flex items-center justify-center p-5">
       <div className="w-full max-w-md">
@@ -274,25 +275,32 @@ function Auth({
           <p className="text-slate-400 dark:text-slate-400 text-xs font-semibold tracking-wide uppercase mb-1">Cooperative Thrift</p>
           <p className="text-slate-500 dark:text-slate-300 mb-5">Authorized personnel only.</p>
 
-          <input
-            className="w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white p-3 rounded-lg mb-3"
-            placeholder="Username or email"
-            value={login.username}
-            onChange={e => setLogin({ ...login, username: e.target.value })}
-          />
+          <form onSubmit={e => { e.preventDefault(); signIn(); }}>
+            <input
+              className="w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white p-3 rounded-lg mb-3"
+              placeholder="Username or email"
+              value={login.username}
+              onChange={e => setLogin({ ...login, username: e.target.value })}
+            />
 
-          <input
-            className="w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white p-3 rounded-lg mb-3"
-            type="password"
-            placeholder="Password"
-            value={login.password}
-            onChange={e => setLogin({ ...login, password: e.target.value })}
-            onKeyDown={e => e.key === "Enter" && signIn()}
-          />
+            <span className="flex items-stretch border dark:border-slate-600 dark:bg-slate-800 rounded-lg overflow-hidden mb-3">
+              <input
+                className="w-full p-3 outline-none dark:bg-slate-800 dark:text-white"
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={login.password}
+                onChange={e => setLogin({ ...login, password: e.target.value })}
+                enterKeyHint="go"
+              />
+              <button type="button" onClick={() => setShowPassword(s => !s)} className="px-3 text-sm font-semibold text-slate-500 dark:text-slate-300">
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </span>
 
-          <button className="w-full bg-[#173ea5] text-white p-3 rounded-lg font-semibold" onClick={signIn}>
-            Secure login
-          </button>
+            <button type="submit" className="w-full bg-[#173ea5] text-white p-3 rounded-lg font-semibold">
+              Secure login
+            </button>
+          </form>
 
           {err && <p className="text-red-600 dark:text-red-400 mt-3 text-sm">{err}</p>}
         </div>

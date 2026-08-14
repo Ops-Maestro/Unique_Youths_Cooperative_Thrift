@@ -16,6 +16,15 @@ const schema = new mongoose.Schema(
       index: true
     },
 
+    // Which channel this specific code was actually sent through - kept
+    // per-OTP (not just per-user) so the history is accurate even if a
+    // member's preferred channel changes between one code and the next.
+    channel: {
+      type: String,
+      enum: ["email", "sms"],
+      default: "email"
+    },
+
     otpHash: {
       type: String,
       required: true

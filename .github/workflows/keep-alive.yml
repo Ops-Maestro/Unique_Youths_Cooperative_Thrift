@@ -14,11 +14,14 @@ name: Keep backend awake
 #
 # Note: this reduces cold starts but can't fully eliminate them (Render can
 # still restart the service for deploys/maintenance), and GitHub Actions'
-# free-tier scheduler can occasionally skip/delay a run by a few minutes.
+# free-tier scheduler can occasionally skip/delay a run by anywhere from a
+# few minutes to a couple of hours - this is now a backup to UptimeRobot's
+# reliable 5-minute external monitor, not the primary mechanism, so it
+# doesn't need to be frequent to still be useful.
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/1 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -26,8 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
-        env:
-          BACKEND_HEALTH_URL: ${{ secrets.BACKEND_HEALTH_URL }}
         run: |
           if [ -z "${{ secrets.BACKEND_HEALTH_URL }}" ]; then
             echo "BACKEND_HEALTH_URL secret is not set - skipping."
