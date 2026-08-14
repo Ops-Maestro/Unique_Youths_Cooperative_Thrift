@@ -50,7 +50,9 @@ name: Build Admin Android APK
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
+      - feature/admin-android-app
     paths:
       - "unique-youths-admin/**"
       - ".github/workflows/build-admin-android.yml"
