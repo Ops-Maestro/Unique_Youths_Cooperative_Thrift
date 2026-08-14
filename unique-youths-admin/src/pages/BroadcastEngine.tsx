@@ -36,7 +36,11 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
   const load = async () => {
     try {
       setErr("");
-      setItems(await api("/api/admin/announcements", { headers: { Authorization: `Bearer ${token}` } }));
+      setItems(
+        await api("/api/admin/announcements", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      );
     } catch (e: any) {
       setErr(e.message);
     }
@@ -51,8 +55,10 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
       setErr("Write a message first.");
       return;
     }
+
     setErr("");
     setMsg("");
+
     try {
       await api("/api/admin/announcements", {
         method: "POST",
@@ -60,12 +66,19 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
         body: JSON.stringify({
           type,
           description,
-          ...(type === "party_banner" ? { venue: venue || undefined, eventDate: eventDate || undefined } : {})
+          ...(type === "party_banner"
+            ? {
+                venue: venue || undefined,
+                eventDate: eventDate || undefined
+              }
+            : {})
         })
       });
+
       setDescription("");
       setVenue("");
       setEventDate("");
+
       setMsg(
         type === "party_banner"
           ? "Party banner posted — every member will see it on their dashboard until you take it down."
@@ -73,6 +86,7 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
           ? "App update notification pushed — members will see the update banner with your link."
           : "Announcement pushed to every member's feed. It stays until you delete it."
       );
+
       await load();
     } catch (e: any) {
       setErr(e.message);
@@ -83,11 +97,13 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
     setErr("");
     setMsg("");
     setDeletingId(id);
+
     try {
       await api(`/api/admin/announcements/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
+
       setMsg("Announcement deleted.");
       await load();
     } catch (e: any) {
@@ -98,44 +114,60 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
   };
 
   return (
-    <div>
-      <PageHeader title="Broadcast Engine" subtitle="Push a card to every member's dashboard feed — every member sees it, regardless of their circle." />
+    <div className="min-w-0">
+      <PageHeader
+        title="Broadcast Engine"
+        subtitle="Push a card to every member's dashboard feed — every member sees it, regardless of their circle."
+      />
 
       {err && <Banner tone="error" message={err} />}
       {msg && <Banner tone="success" message={msg} />}
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm p-5 mb-6">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm p-5 mb-6 min-w-0">
         <div className="flex flex-wrap gap-2 mb-3">
-          {(["general_update", "payment_received", "payment_missed", "party_banner", "app_update"] as const).map(t => (
+          {(
+            [
+              "general_update",
+              "payment_received",
+              "payment_missed",
+              "party_banner",
+              "app_update"
+            ] as const
+          ).map(t => (
             <button
               key={t}
               onClick={() => setType(t)}
               className={`px-3 py-1.5 rounded-lg text-sm font-semibold border ${
-                type === t ? "bg-blue-800 text-white border-blue-800" : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                type === t
+                  ? "bg-blue-800 text-white border-blue-800"
+                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
               }`}
             >
               {t.replace("_", " ")}
             </button>
           ))}
         </div>
+
         {type === "party_banner" && (
           <div className="grid sm:grid-cols-2 gap-3 mb-3">
             <input
-              className="border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
+              className="w-full min-w-0 border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
               placeholder="Venue (e.g. Community Hall, Ikeja)"
               value={venue}
               onChange={e => setVenue(e.target.value)}
             />
+
             <input
               type="datetime-local"
-              className="border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
+              className="w-full min-w-0 border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-2.5 text-sm"
               value={eventDate}
               onChange={e => setEventDate(e.target.value)}
             />
           </div>
         )}
+
         <textarea
-          className="w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3 min-h-24"
+          className="w-full min-w-0 max-w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3 min-h-24 resize-y"
           placeholder={
             type === "party_banner"
               ? "e.g. Our quarterly get-together is coming up! Join us to celebrate..."
@@ -146,12 +178,19 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
           value={description}
           onChange={e => setDescription(e.target.value)}
         />
+
         <button
           onClick={send}
           className="mt-3 inline-flex items-center gap-2 bg-red-600 text-white px-5 py-3 rounded-lg font-semibold"
         >
-          <Megaphone size={18} /> {type === "party_banner" ? "Post party banner" : type === "app_update" ? "Publish app update" : "Push to member feed"}
+          <Megaphone size={18} />
+          {type === "party_banner"
+            ? "Post party banner"
+            : type === "app_update"
+            ? "Publish app update"
+            : "Push to member feed"}
         </button>
+
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
           {type === "party_banner"
             ? "Shows as a dedicated banner (app logo + name) on every member's dashboard, separate from the ticker. Stays up until you take it down below."
@@ -161,21 +200,37 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
         </p>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 min-w-0">
         {items.map(a => (
-          <div key={a._id} className={`rounded-xl p-4 flex items-start justify-between gap-3 ${TYPE_STYLES[a.type]}`}>
-            <div>
-              <p className="font-medium">{a.description}</p>
-              <p className="text-xs mt-1 opacity-70 flex flex-wrap items-center gap-1">
-                {a.user ? `Private to ${a.user.firstName} ${a.user.lastName} · ` : a.circle ? `${a.circle.name} · Cycle ${a.circle.cycleNumber} · ` : "All members · "}
-                {new Date(a.createdAt).toLocaleString()}
+          <div
+            key={a._id}
+            className={`rounded-xl p-4 flex items-start gap-3 min-w-0 max-w-full ${TYPE_STYLES[a.type]}`}
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-medium break-words [overflow-wrap:anywhere]">
+                {a.description}
+              </p>
+
+              <p className="text-xs mt-1 opacity-70 flex flex-wrap items-center gap-1 break-words">
+                {a.user
+                  ? `Private to ${a.user.firstName} ${a.user.lastName} · `
+                  : a.circle
+                  ? `${a.circle.name} · Cycle ${a.circle.cycleNumber} · `
+                  : "All members · "}
+
+                <span className="break-words">
+                  {new Date(a.createdAt).toLocaleString()}
+                </span>
+
                 {a.expiresAt && (
-                  <span className="inline-flex items-center gap-1">
-                    <Timer size={11} /> auto-clears {new Date(a.expiresAt).toLocaleTimeString()}
+                  <span className="inline-flex items-center gap-1 break-words">
+                    <Timer size={11} />
+                    auto-clears {new Date(a.expiresAt).toLocaleTimeString()}
                   </span>
                 )}
               </p>
             </div>
+
             <button
               onClick={() => remove(a._id)}
               disabled={deletingId === a._id}
@@ -186,7 +241,12 @@ export default function BroadcastEngine({ token, refreshKey }: { token: string; 
             </button>
           </div>
         ))}
-        {items.length === 0 && <p className="text-slate-400 dark:text-slate-500 text-center py-8">No announcements yet.</p>}
+
+        {items.length === 0 && (
+          <p className="text-slate-400 dark:text-slate-500 text-center py-8">
+            No announcements yet.
+          </p>
+        )}
       </div>
     </div>
   );
