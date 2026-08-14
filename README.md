@@ -1,6 +1,9 @@
 # Unique Youths Cooperative Thrift Club — Version 1.1.0
 
-### 📖 Description: A full-stack web application for running a traditional Nigerian Ajo
+## 📖 Description
+
+### Ajo Thrift Club
+A full-stack web application for running a traditional Nigerian Ajo
 (rotating savings) circle online. Members register, get verified by an
 admin, and contribute a fixed monthly amount; the admin records monthly contributions confirmed via WhatsApp payment proof, and two members are randomly selected each month to receive a lump-sum payout. The circle runs until the last member has been paid out.
 
