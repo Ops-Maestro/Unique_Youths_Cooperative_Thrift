@@ -52,7 +52,6 @@ on:
   push:
     branches:
       - master
-      - feature/admin-android-app
     paths:
       - "unique-youths-admin/**"
       - ".github/workflows/build-admin-android.yml"
