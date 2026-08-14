@@ -15,6 +15,9 @@ import adminRoutes from "./src/routes/admin.routes.js";
 
 const app = express();
 
+// Trust the first proxy (required for Render / rate-limiting behind proxies)
+app.set('trust proxy', 1);
+
 const allowed = () =>
   [
     process.env.CLIENT_URL,
