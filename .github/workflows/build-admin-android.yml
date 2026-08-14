@@ -51,7 +51,7 @@ name: Build Admin Android APK
 on:
   push:
     branches:
-      - feature/secure-random-ajo-draw
+      - master
     paths:
       - "unique-youths-admin/**"
       - ".github/workflows/build-admin-android.yml"
