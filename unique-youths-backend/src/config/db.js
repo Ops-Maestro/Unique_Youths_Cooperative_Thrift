@@ -10,7 +10,7 @@ export async function connectDatabase() {
   // makes the driver default to a database literally called "test". This
   // makes the real database name a config decision, not an accident of
   // which connection string got pasted into .env.
-  const dbName = process.env.MONGODB_DB_NAME || "unique_youths";
+  const dbName = process.env.MONGODB_DB_NAME || "unique_youths_cooperative_thrift";
 
   await mongoose.connect(process.env.MONGODB_URI, { dbName });
   console.log(`MongoDB Atlas connected (database: "${dbName}")`);
