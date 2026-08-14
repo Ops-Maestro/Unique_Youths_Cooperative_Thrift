@@ -1,0 +1,172 @@
+name: Build Admin Android APK
+
+# Builds the admin web app, wraps it in the Capacitor Android shell, and
+# produces a real, installable APK - then publishes it to a separate
+# GitHub Release so there's a stable download link for the admin app.
+#
+# The admin Android project is generated during the workflow itself, so
+# Android Studio or a locally installed Android SDK is not required on the
+# development machine. GitHub Actions provides the Android build
+# environment and Gradle builds the APK.
+#
+# ---------------------------------------------------------------------
+# ONE-TIME SETUP (do this once in the GitHub repo before the first run):
+# ---------------------------------------------------------------------
+# 1. Repo Settings -> Secrets and variables -> Actions -> Variables tab
+#    - Add ADMIN_APP_URL = the public URL your admin app is deployed to
+#      (e.g. https://unique-youths-admin.onrender.com). The APK is a
+#      WebView shell pointing at this live site - it always shows whatever
+#      is currently deployed there, no separate mobile build to keep in
+#      sync.
+#
+#    - BACKEND_API_URL should already exist for the client workflow and
+#      should point to the public backend API URL.
+#
+#    - CLIENT_APP_URL should already exist if the admin web app uses it
+#      for its "View member dashboard feed" link.
+#
+# 2. (Optional but recommended) To produce a properly *signed* release APK
+#    instead of a debug-signed one, add these repo Secrets:
+#      ADMIN_ANDROID_KEYSTORE_BASE64
+#        - `base64 -w0 your-admin-release-key.keystore`
+#      ADMIN_ANDROID_KEYSTORE_PASSWORD
+#      ADMIN_ANDROID_KEY_ALIAS
+#      ADMIN_ANDROID_KEY_PASSWORD
+#
+#    Generate a separate admin keystore locally if you don't have one:
+#      keytool -genkeypair -v \
+#        -keystore admin-release.keystore \
+#        -alias uniqueyouthsadmin \
+#        -keyalg RSA -keysize 2048 -validity 10000
+#
+#    Keep that keystore file somewhere safe outside git - losing it means
+#    you can never publish an update under the same admin app identity again.
+#
+#    Without these secrets, the workflow still runs and produces a
+#    debug-signed APK, which installs and works fine for testing/sideloading
+#    - Android will just show a generic "developer" signature instead of
+#    your own.
+# ---------------------------------------------------------------------
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "unique-youths-admin/**"
+      - ".github/workflows/build-admin-android.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: unique-youths-admin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: unique-youths-admin/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Capacitor
+        run: |
+          npm install @capacitor/core @capacitor/android
+          npm install --save-dev @capacitor/cli
+
+      - name: Build web app
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}
+          VITE_CLIENT_URL: ${{ vars.CLIENT_APP_URL }}
+
+      - name: Create Capacitor configuration
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from "@capacitor/cli";
+
+          const config: CapacitorConfig = {
+            appId: "com.uniqueyouths.admin",
+            appName: "Unique Youth Admin",
+            webDir: "dist",
+            server: {
+              url: process.env.ADMIN_APP_URL,
+              cleartext: false
+            }
+          };
+
+          export default config;
+          EOF
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+        env:
+          ADMIN_APP_URL: ${{ vars.ADMIN_APP_URL }}
+
+      - name: Decode signing keystore (if configured)
+        id: signing
+        working-directory: unique-youths-admin/android
+        run: |
+          if [ -n "${{ secrets.ADMIN_ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ADMIN_ANDROID_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.has_keystore == 'true'
+        working-directory: unique-youths-admin/android
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$PWD/app/release.keystore" \
+            -Pandroid.injected.signing.store.password="${{ secrets.ADMIN_ANDROID_KEYSTORE_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.ADMIN_ANDROID_KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.ADMIN_ANDROID_KEY_PASSWORD }}"
+          mkdir -p ../apk-output
+          cp app/build/outputs/apk/release/app-release.apk ../apk-output/unique-youths-admin.apk
+
+      - name: Build debug APK (no signing secrets configured)
+        if: steps.signing.outputs.has_keystore == 'false'
+        working-directory: unique-youths-admin/android
+        run: |
+          echo "::warning::No ADMIN_ANDROID_KEYSTORE_BASE64 secret set - building a debug-signed APK instead of a release-signed one. See the comment at the top of this workflow file for how to add proper signing."
+          ./gradlew assembleDebug
+          mkdir -p ../apk-output
+          cp app/build/outputs/apk/debug/app-debug.apk ../apk-output/unique-youths-admin.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unique-youths-admin-apk
+          path: unique-youths-admin/apk-output/unique-youths-admin.apk
+
+      - name: Publish to "latest-admin-android" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-admin-android
+          name: Latest Admin Android build
+          body: Automatically built from the latest `master` branch. Downloaded via the admin app download link.
+          prerelease: true
+          files: unique-youths-admin/apk-output/unique-youths-admin.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from "react";
+import {useEffect,useRef,useState,type ChangeEvent} from "react";
 import {api} from "./lib/api";
 
 const slides=[
@@ -30,7 +30,7 @@ const PASSWORD_TIP="Use at least 8 characters and mix uppercase, lowercase, numb
 // Empty registration form, used both for the initial state and to reset
 // the wizard cleanly (e.g. after logout) so a new registration never
 // starts from stale, previously-typed data.
-const BLANK_FORM={firstName:"",lastName:"",username:"",email:"",password:"",primaryPhone:"",residentialAddress:"",bank:{bankName:"",accountNumber:"",accountName:""}};
+const BLANK_FORM={firstName:"",lastName:"",username:"",email:"",password:"",primaryPhone:"",residentialAddress:"",bank:{bankName:"",accountNumber:"",accountName:""},otpChannel:"email"};
 
 /* ============================================================
  * SESSION - the member token lives in sessionStorage, not localStorage.
@@ -44,6 +44,16 @@ const BLANK_FORM={firstName:"",lastName:"",username:"",email:"",password:"",prim
  * in localStorage.
  * ============================================================ */
 const HAS_REGISTERED_KEY="uy_has_registered";
+// A persistent ID for this browser/device - deliberately separate from
+// the session token (which lives in sessionStorage and is per-tab). This
+// stays in localStorage across logins/logouts so the backend can tell "a
+// device we've seen before" from "a genuinely new device," for the
+// new-device email alert.
+function getDeviceId(){
+ let id=localStorage.getItem("uy_device_id");
+ if(!id){id=crypto.randomUUID();localStorage.setItem("uy_device_id",id)}
+ return id;
+}
 const THEME_KEY="uy_theme";
 const TOKEN_KEY="memberToken";
 
@@ -106,42 +116,101 @@ function isStandalone(){
 }
 
 function GetTheApp(){
- const [dismissed,setDismissed]=useState(()=>localStorage.getItem("uy_dismissed_app_banner")==="1");
  const [open,setOpen]=useState<"android"|"ios"|null>(null);
- if(dismissed||isStandalone())return null;
+ const [dismissed,setDismissed]=useState<boolean>(() => {
+   try{
+     return localStorage.getItem("uy_dismissed_get_the_app")==="1";
+   }catch{
+     return false;
+   }
+ });
 
- const dismiss=()=>{localStorage.setItem("uy_dismissed_app_banner","1");setDismissed(true)};
+ if(isStandalone() || dismissed)return null;
 
- return <div className="mt-5 bg-white dark:bg-slate-900 rounded-2xl p-5 shadow border border-blue-100 dark:border-slate-700">
-   <div className="flex items-start justify-between gap-3">
-     <div className="flex items-center gap-3">
-       <img src="/brand/logo-badge.png" alt="" className="w-10 h-10 shrink-0"/>
-       <div>
-         <h2 className="font-bold text-slate-900 dark:text-white">Get the mobile app</h2>
-         <p className="text-sm text-slate-500 dark:text-slate-400">Install Unique Youth on your phone's home screen for faster, app-like access.</p>
-       </div>
+ const dismiss=()=>{
+   setDismissed(true);
+   localStorage.setItem("uy_dismissed_get_the_app","1");
+ };
+
+ return <div className="relative mt-5 bg-white dark:bg-slate-900 rounded-2xl p-5 shadow border border-blue-100 dark:border-slate-700">
+   <button
+     type="button"
+     onClick={dismiss}
+     aria-label="Dismiss mobile app message"
+     title="Dismiss"
+     className="absolute top-3 right-3 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xl leading-none"
+   >
+     ×
+   </button>
+
+   <div className="flex items-center gap-3 pr-8">
+     <img src="/brand/logo-badge.png" alt="" className="w-10 h-10 shrink-0"/>
+     <div>
+       <h2 className="font-bold text-slate-900 dark:text-white">Get the mobile app</h2>
+       <p className="text-sm text-slate-500 dark:text-slate-400">
+         Install Unique Youth on your phone's home screen for faster, app-like access.
+       </p>
      </div>
-     <button onClick={dismiss} aria-label="Dismiss" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0 text-lg leading-none">×</button>
    </div>
+
    <div className="flex flex-wrap gap-2 mt-4">
-     <button onClick={()=>setOpen(o=>o==="android"?null:"android")} className={`px-4 py-2 rounded-lg text-sm font-semibold border ${open==="android"?"bg-blue-800 text-white border-blue-800":"border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200"}`}>Android</button>
-     <button onClick={()=>setOpen(o=>o==="ios"?null:"ios")} className={`px-4 py-2 rounded-lg text-sm font-semibold border ${open==="ios"?"bg-blue-800 text-white border-blue-800":"border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200"}`}>iPhone</button>
+     <button
+       onClick={()=>setOpen(o=>o==="android"?null:"android")}
+       className={`px-4 py-2 rounded-lg text-sm font-semibold border ${
+         open==="android"
+           ?"bg-blue-800 text-white border-blue-800"
+           :"border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200"
+       }`}
+     >
+       Android
+     </button>
+
+     <button
+       onClick={()=>setOpen(o=>o==="ios"?null:"ios")}
+       className={`px-4 py-2 rounded-lg text-sm font-semibold border ${
+         open==="ios"
+           ?"bg-blue-800 text-white border-blue-800"
+           :"border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200"
+       }`}
+     >
+       iPhone
+     </button>
    </div>
-   {open==="android"&&<div className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-     {APK_DOWNLOAD_URL
-       ?<a href={APK_DOWNLOAD_URL} className="inline-block bg-red-600 text-white font-semibold px-5 py-3 rounded-lg">Download APK</a>
-       :<p className="text-amber-600 dark:text-amber-400">The Android download isn't set up yet — add <code>VITE_APK_DOWNLOAD_URL</code> once the app is published. See <code>MOBILE_APP.md</code>.</p>}
-     <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">After downloading, open the file and allow "Install from unknown sources" if prompted — this app isn't on the Play Store, so Android shows that warning for any APK installed this way.</p>
-   </div>}
-   {open==="ios"&&<div className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-     <p>iPhone doesn't support installing apps outside the App Store this way, but Safari can add this site to your home screen as a full app icon:</p>
-     <ol className="list-decimal list-inside mt-2 space-y-1">
-       <li>Open this page in <b>Safari</b> (not Chrome).</li>
-       <li>Tap the <b>Share</b> icon (square with an arrow) at the bottom of the screen.</li>
-       <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
-       <li>Tap <b>Add</b> — the Unique Youth icon now opens full-screen from your home screen, just like a regular app.</li>
-     </ol>
-   </div>}
+
+   {open==="android"&&
+     <div className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+       {APK_DOWNLOAD_URL
+         ?<a
+             href={APK_DOWNLOAD_URL}
+             className="inline-block bg-red-600 text-white font-semibold px-5 py-3 rounded-lg"
+           >
+             Download APK
+           </a>
+         :<p className="text-amber-600 dark:text-amber-400">
+             The Android download isn't set up yet — add <code>VITE_APK_DOWNLOAD_URL</code> once the app is published. See <code>MOBILE_APP.md</code>.
+           </p>
+       }
+
+       <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+         After downloading, open the file and allow "Install from unknown sources" if prompted — this app isn't on the Play Store, so Android shows that warning for any APK installed this way.
+       </p>
+     </div>
+   }
+
+   {open==="ios"&&
+     <div className="mt-4 text-sm text-slate-600 dark:text-slate-300">
+       <p>
+         iPhone doesn't support installing apps outside the App Store this way, but Safari can add this site to your home screen as a full app icon:
+       </p>
+
+       <ol className="list-decimal list-inside mt-2 space-y-1">
+         <li>Open this page in <b>Safari</b> (not Chrome).</li>
+         <li>Tap the <b>Share</b> icon (square with an arrow) at the bottom of the screen.</li>
+         <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+         <li>Tap <b>Add</b> — the Unique Youth icon now opens full-screen from your home screen, just like a regular app.</li>
+       </ol>
+     </div>
+   }
  </div>;
 }
 
@@ -218,7 +287,7 @@ export default function App(){
      // review their bank details, then Forward again) - don't re-register.
      if(userId){setStep(2);return}
      const d=await api("/api/auth/register",{method:"POST",body:JSON.stringify(form)});
-     setUserId(d.userId);setStep(2);setMsg("Verification code sent to your email.")
+     setUserId(d.userId);setStep(2);setMsg(d.message||"Verification code sent.")
    }catch(e:any){setError(e.message)}
  };
 
@@ -247,7 +316,7 @@ export default function App(){
  const login=async()=>{
    try{
      setError("");
-     const d=await api("/api/auth/login",{method:"POST",body:JSON.stringify(loginForm)});
+     const d=await api("/api/auth/login",{method:"POST",body:JSON.stringify({...loginForm,deviceId:getDeviceId()})});
      sessionStorage.setItem(TOKEN_KEY,d.token);
      localStorage.setItem(HAS_REGISTERED_KEY,"1");
      setMemberToken(d.token);
@@ -321,9 +390,11 @@ export default function App(){
       {msg&&<div className="p-3 mb-3 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">{msg}</div>}
       {error&&<div className="p-3 mb-3 rounded bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300">{error}</div>}
       <Panel title="Log in to your account">
-        <Input label="Email or username" value={loginForm.usernameOrEmail} onChange={(v:string)=>setLoginForm({...loginForm,usernameOrEmail:v})}/>
-        <PasswordInput label="Password" value={loginForm.password} onChange={(v:string)=>setLoginForm({...loginForm,password:v})}/>
-        <button onClick={login} className="btn">Log in</button>
+        <form onSubmit={e=>{e.preventDefault();login()}}>
+          <Input label="Email or username" value={loginForm.usernameOrEmail} onChange={(v:string)=>{setLoginForm({...loginForm,usernameOrEmail:v});setError("")}}/>
+          <PasswordInput label="Password" value={loginForm.password} onChange={(v:string)=>{setLoginForm({...loginForm,password:v});setError("")}} enterKeyHint="go"/>
+          <button type="submit" className="btn">Log in</button>
+        </form>
         <div className="text-center mt-4">
           <button type="button" className="text-sm text-blue-700 dark:text-blue-300 underline" onClick={()=>setShowForgot(s=>!s)}>Forgot password?</button>
           {showForgot&&<p className="text-sm text-slate-500 dark:text-slate-300 mt-2">There's no self-service password reset yet. Contact an administrator directly (call, message, or in person) and they can reset it for you.</p>}
@@ -336,6 +407,14 @@ export default function App(){
       {error&&<div className="p-3 mb-3 rounded bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300">{error}</div>}
       {step===0&&<Panel title="Personal information">
         {["firstName","lastName","username","email","primaryPhone"].map(k=><Input key={k} label={k} value={form[k]} onChange={(v:string)=>set(k,v)}/>)}
+        <label className="block mb-4">
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">How should we send your verification code?</span>
+          <div className="flex gap-2 mt-2">
+            <button type="button" onClick={()=>set("otpChannel","email")} className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold border ${form.otpChannel==="email"?"bg-blue-800 text-white border-blue-800":"border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300"}`}>Email (free)</button>
+            <button type="button" onClick={()=>set("otpChannel","sms")} className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold border ${form.otpChannel==="sms"?"bg-blue-800 text-white border-blue-800":"border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300"}`}>SMS to my phone</button>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Email is the default and doesn't cost anything to send. Pick SMS only if you'd rather get the code as a text message.</p>
+        </label>
         <PasswordInput label="Password" value={form.password} onChange={(v:string)=>set("password",v)}/>
         <PasswordInput label="Confirm password" value={confirmPassword} onChange={setConfirmPassword}/>
         <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2 mb-3">{PASSWORD_TIP}</p>
@@ -351,8 +430,8 @@ export default function App(){
           <button onClick={start} className="flex-1 bg-red-600 text-white font-semibold py-3 rounded-lg hover:bg-red-700 transition">Register &amp; Send OTP</button>
         </StepNav>
       </Panel>}
-      {step===2&&<Panel title="Verify your email">
-        <p className="text-slate-600 dark:text-slate-300">We sent a 6-digit verification code to <b>{form.email}</b>.</p>
+      {step===2&&<Panel title={form.otpChannel==="sms"?"Verify your phone number":"Verify your email"}>
+        <p className="text-slate-600 dark:text-slate-300">We sent a 6-digit verification code to {form.otpChannel==="sms"?<b>{form.primaryPhone}</b>:<b>{form.email}</b>}.</p>
         <Input label="OTP" value={otp} onChange={setOtp}/>
         <StepNav onBack={()=>setStep(1)}>
           <button onClick={verify} className="flex-1 bg-red-600 text-white font-semibold py-3 rounded-lg hover:bg-red-700 transition">Verify OTP</button>
@@ -392,7 +471,7 @@ function StepNav({onBack,children}:{onBack:()=>void;children:any}){
 function Panel({title,children}:any){return <div className="border dark:border-slate-700 rounded-2xl shadow-sm p-5 dark:bg-slate-900"><h2 className="text-2xl font-bold mb-5">{title}</h2>{children}</div>}
 function Input({label,value,onChange,type="text"}:any){return <label className="block mb-3"><span className="text-sm font-semibold capitalize">{label}</span><input className="mt-1 w-full border dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none" type={type} value={value} onChange={e=>onChange(e.target.value)} required/></label>}
 
-function PasswordInput({label,value,onChange}:any){
+function PasswordInput({label,value,onChange,enterKeyHint}:any){
  const [visible,setVisible]=useState(false);
  return <label className="block mb-3">
    <span className="text-sm font-semibold">{label}</span>
@@ -402,6 +481,7 @@ function PasswordInput({label,value,onChange}:any){
        type={visible?"text":"password"}
        value={value}
        onChange={e=>onChange(e.target.value)}
+       enterKeyHint={enterKeyHint}
        required
      />
      <button
@@ -426,8 +506,9 @@ const STATUS_COPY:Record<string,{title:string,text:string}> = {
 const STATUS_FONT={fontFamily:"'FreeMono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"};
 
 function Ticker({announcements}:{announcements:any[]}){
- const hasItems=announcements&&announcements.length>0;
- const text=hasItems?announcements.map(a=>a.description).join("     •     "):"No new announcements";
+ const tickerItems=announcements?.filter((a:any)=>a.type!=="party_banner"&&a.type!=="app_update")||[];
+ const hasItems=tickerItems.length>0;
+ const text=hasItems?tickerItems.map((a:any)=>a.description).join("     •     "):"No new announcements";
  // Scale the scroll duration with how much text there is, so adding more
  // announcements doesn't make everything whip by faster - it always moves
  // at roughly the same reading speed (~55px/sec).
@@ -437,6 +518,195 @@ function Ticker({announcements}:{announcements:any[]}){
      ?<div className="inline-block whitespace-nowrap animate-marquee" style={{animationDuration:`${duration}s`}}>{text}</div>
      :<div className="px-4 text-slate-400">{text}</div>}
  </div>;
+}
+
+function AppUpdateBanner({announcements}:{announcements:any[]}){
+ const appUpdates=announcements?.filter(
+   (a:any)=>a.type==="app_update"
+ )||[];
+
+ if(!appUpdates.length)return null;
+
+ return (
+   <div className="bg-red-700 text-white px-4 py-3 border-b border-red-800 shadow-md">
+     <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+       {appUpdates.map((update:any,idx:number)=>{
+         const description=String(update.description||"");
+
+         // Find the GitHub/APK URL in the announcement.
+         const urlMatch=description.match(/https?:\/\/[^\s]+/i);
+         const downloadUrl=urlMatch?.[0]||"";
+
+         // Keep the announcement text but remove the raw URL from it.
+         const message=downloadUrl
+           ?description.replace(downloadUrl,"").trim()
+           :description;
+
+         return (
+           <div
+             key={update._id||idx}
+             className="text-sm font-medium text-center sm:text-left flex-1"
+           >
+             🚀{" "}
+             <span className="font-bold underline">
+               App Update Available:
+             </span>{" "}
+             <span>{message}</span>
+
+             {downloadUrl&&(
+               <>
+                 {" "}
+                 <a
+                   href={downloadUrl}
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   className="underline font-bold text-yellow-200 hover:text-white"
+                 >
+                   APK
+                 </a>
+               </>
+             )}
+           </div>
+         );
+       })}
+     </div>
+   </div>
+ );
+}
+
+function PartyBanner({announcements}:{announcements:any[]}){
+ const [dismissed,setDismissed]=useState<string[]>(()=>{
+   try{
+     return JSON.parse(
+       localStorage.getItem("uy_dismissed_party_banners")||"[]"
+     );
+   }catch{
+     return [];
+   }
+ });
+
+ const banner=announcements?.find(
+   (a:any)=>
+     a.type==="party_banner" &&
+     !dismissed.includes(a._id)
+ );
+
+ if(!banner)return null;
+
+ const dismiss=()=>{
+   const next=[...dismissed,banner._id];
+   setDismissed(next);
+   localStorage.setItem(
+     "uy_dismissed_party_banners",
+     JSON.stringify(next)
+   );
+ };
+
+ return (
+   <div className="fixed inset-0 z-40 flex items-center justify-center p-5 bg-black/70">
+     <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full p-12 text-center border-4 border-double border-red-600/50 dark:border-red-400/50">
+
+       <button
+         onClick={dismiss}
+         aria-label="Close"
+         className="absolute top-4 right-5 text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-2xl leading-none font-bold"
+       >
+         ×
+       </button>
+
+       <span className="block text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none">
+         "
+       </span>
+
+       <h2 className="text-3xl sm:text-4xl font-black text-red-700 dark:text-red-400 -mt-4 uppercase tracking-wide">
+         🎉 Party Time!
+       </h2>
+
+       <p className="text-xl sm:text-2xl font-semibold text-slate-800 dark:text-slate-100 mt-8 leading-relaxed">
+         {banner.description}
+       </p>
+
+       {(banner.venue || banner.eventDate) && (
+         <div className="mt-8 space-y-5 text-lg sm:text-xl font-bold text-slate-800 dark:text-slate-100">
+           {banner.venue && (
+             <div className="flex items-start justify-center gap-3">
+               <span className="text-2xl shrink-0">📍</span>
+               <span>{banner.venue}</span>
+             </div>
+           )}
+
+           {banner.eventDate && (
+             <div className="flex items-start justify-center gap-3">
+               <span className="text-2xl shrink-0">🗓️</span>
+               <span>
+                 {new Date(banner.eventDate).toLocaleString(
+                   undefined,
+                   {
+                     dateStyle:"medium",
+                     timeStyle:"short"
+                   }
+                 )}
+               </span>
+             </div>
+           )}
+         </div>
+       )}
+
+       <span className="block text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none rotate-180 mt-6">
+         "
+       </span>
+
+       <div className="flex items-center justify-center gap-3 mt-8 pt-6 border-t dark:border-slate-700">
+         <img
+           src="/brand/logo-badge.png"
+           alt=""
+           className="w-12 h-12"
+         />
+
+         <div className="text-left">
+           <p className="font-black text-lg text-slate-900 dark:text-white leading-tight">
+             Unique Youth
+           </p>
+
+           <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+             Cooperative Thrift Club
+           </p>
+         </div>
+       </div>
+     </div>
+   </div>
+ );
+}
+
+function BroadcastModal({announcements}:{announcements:any[]}){
+ const broadcasts=announcements?.filter(
+   (a:any)=>
+     a.isBroadcast &&
+     a.type!=="party_banner" &&
+     a.type!=="app_update"
+ )||[];
+
+ if(!broadcasts.length)return null;
+
+ const text=broadcasts
+   .map((a:any)=>a.description)
+   .join("     •     ");
+
+ const duration=Math.min(
+   60,
+   Math.max(20,broadcasts.length*10)
+ );
+
+ return (
+   <div className="bg-gradient-to-r from-red-600 to-red-700 text-white overflow-hidden py-4">
+     <div
+       className="inline-block whitespace-nowrap animate-marquee font-black text-lg"
+       style={{animationDuration:`${duration}s`}}
+     >
+       {text}
+     </div>
+   </div>
+ );
 }
 
 function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:any){
@@ -459,9 +729,10 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
  const circle=dashboard?.circle;
 
  return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+  <AppUpdateBanner announcements={announcements}/>
   <header className="bg-blue-800 text-white p-4 flex justify-between items-center gap-3 flex-wrap">
     <Brand/>
-    <div className="flex items-center gap-4 flex-wrap">
+    <div className="flex items-center gap-3 flex-wrap justify-end w-full sm:w-auto">
       <ThemeToggle theme={theme} setTheme={setTheme}/>
       {isVerified && <button onClick={()=>setView(v=>v==="profile"?"home":"profile")} className="text-sm font-semibold flex items-center gap-2">
         {dashboard?.user?.avatarDataUrl
@@ -477,10 +748,18 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
   </header>
 
   <Ticker announcements={announcements}/>
+  <PartyBanner announcements={announcements}/>
+  <BroadcastModal announcements={announcements}/>
 
   {view==="profile"?<ProfilePage dashboard={dashboard} onSaved={onRefresh} onDone={()=>setView("home")}/>:
   <main className="max-w-6xl mx-auto p-5">
-   <h1 className="text-3xl font-black text-slate-900 dark:text-white">Welcome, {dashboard?.user?.firstName||"..."}</h1>
+   <div className="flex items-center gap-3 flex-wrap">
+     <h1 className="text-3xl font-black text-slate-900 dark:text-white">Welcome, {dashboard?.user?.firstName||"..."}</h1>
+     {dashboard?.user?.isOnline && <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950 px-2.5 py-1 rounded-full">
+       <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"/><span className="relative inline-flex rounded-full w-2 h-2 bg-green-500"/></span>
+       You're online
+     </span>}
+   </div>
 
    <GetTheApp/>
 
@@ -521,6 +800,22 @@ function Dashboard({dashboard,announcements,onLogout,onRefresh,theme,setTheme}:a
       <div className="mt-3 h-4 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
         <div className={`h-4 rounded-full transition-all ${mp.met?"bg-green-600":"bg-blue-700"}`} style={{width:`${mp.percentage}%`}}/>
       </div>
+    </div>}
+
+    {/* Late fee - always its own separate transaction, never folded into
+        the contribution target above. Only shows up if the admin has
+        actually imposed one. */}
+    {dashboard?.lateFee && <div className={`mt-5 rounded-2xl p-5 shadow border-l-4 ${dashboard.lateFee.status==="paid"?"bg-green-50 dark:bg-green-950 border-green-500":"bg-amber-50 dark:bg-amber-950 border-amber-500"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Late fee</h2>
+        {dashboard.lateFee.status==="paid"
+          ?<span className="text-green-700 dark:text-green-400 font-bold text-sm">Paid ✓</span>
+          :<span className="text-amber-700 dark:text-amber-400 font-bold text-sm">Owed</span>}
+      </div>
+      <p className="text-slate-600 dark:text-slate-300 mt-1">
+        ₦{dashboard.lateFee.amount.toLocaleString()} {dashboard.lateFee.status==="paid"?"paid on":"outstanding since"} {new Date(dashboard.lateFee.status==="paid"?dashboard.lateFee.paidAt:dashboard.lateFee.imposedAt).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
+      </p>
+      {dashboard.lateFee.status!=="paid" && <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">This is separate from your monthly contribution. Pay via bank transfer like usual and send proof to the admin — they'll mark it paid here.</p>}
     </div>}
 
     <div className="grid md:grid-cols-2 gap-5 mt-5">
@@ -592,7 +887,7 @@ function ProfilePage({dashboard,onSaved,onDone}:any){
  const [msg,setMsg]=useState("");
  const [err,setErr]=useState("");
 
- const onPickFile=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+ const onPickFile=async(e:ChangeEvent<HTMLInputElement>)=>{
    const file=e.target.files?.[0];
    if(!file)return;
    setErr("");
