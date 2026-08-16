@@ -1720,6 +1720,53 @@ export default function App() {
               false
             );
 
+            // ✅ CHECK FOR EXISTING CREDENTIALS ON LOGIN SCREEN
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (!mounted)
+                return;
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                // If local flag says enabled but credentials aren't saved, clean up
+                const localEnabled =
+                  localStorage.getItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  ) === "1";
+
+                if (
+                  localEnabled
+                ) {
+                  localStorage.removeItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  );
+
+                  setBiometricEnabled(
+                    false
+                  );
+                }
+              }
+            } catch {
+              // Credential check failed - keep current state
+            }
+
             return;
           } catch {
             if (!mounted)
