@@ -1495,6 +1495,23 @@ export default function App() {
     setError
   ] = useState("");
 
+  /*
+   * error/msg above ONLY render on the logged-out login/register screen
+   * (search "{error &&" - both render sites are inside `mode === "login"`
+   * JSX). Enabling/disabling biometric login happens from the Profile
+   * page, which is only reachable while logged in - so every setError()/
+   * setMsg() call inside the four enable/disable biometric functions was
+   * silently invisible: the toggle would flip back with zero feedback on
+   * failure, and success gave no confirmation either. This is a separate
+   * piece of state specifically for feedback shown on the Profile page.
+   */
+  const [
+    biometricFeedback,
+    setBiometricFeedback
+  ] = useState<
+    { type: "success" | "error"; text: string } | null
+  >(null);
+
   const [
     form,
     setForm
@@ -2043,9 +2060,10 @@ export default function App() {
   const enableNativeBiometricLogin =
     async () => {
       if (!memberToken) {
-        setError(
-          "Please log in with your password before enabling fingerprint login."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Please log in with your password before enabling fingerprint login."
+        });
 
         return;
       }
@@ -2053,53 +2071,24 @@ export default function App() {
       if (
         !isNativeAndroidApp()
       ) {
-        setError(
-          "Native fingerprint login is only available inside the Android app."
-        );
-
-        return;
-      }
-
-      let nativeAvailability: any;
-
-      try {
-        nativeAvailability =
-          await NativeBiometric.isAvailable(
-            {
-              useFallback:
-                false
-            }
-          );
-      } catch (
-        e: any
-      ) {
-        setError(
-          getNativeBiometricErrorMessage(
-            e,
-            "Android biometric authentication is not available on this device."
-          )
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Native fingerprint login is only available inside the Android app."
+        });
 
         return;
       }
 
       if (
-        !nativeAvailability?.isAvailable
+        !nativeFingerprintAvailable
       ) {
-        setError(
-          "Fingerprint authentication is not available on this Android device. Register a fingerprint in Android Settings and try again."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "A fingerprint is not currently available on this Android device. Register a fingerprint in Android Settings and try again."
+        });
 
         return;
       }
-
-      setNativeBiometricAvailable(
-        true
-      );
-
-      setNativeFingerprintAvailable(
-        true
-      );
 
       const username =
         String(
@@ -2113,9 +2102,10 @@ export default function App() {
         ).trim();
 
       if (!username) {
-        setError(
-          "Your username or email could not be determined."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Your username or email could not be determined."
+        });
 
         return;
       }
@@ -2131,8 +2121,10 @@ export default function App() {
         return;
       }
 
-      setError("");
-      setMsg("");
+      setBiometricFeedback(
+        null
+      );
+
       setBiometricBusy(
         true
       );
@@ -2178,41 +2170,9 @@ export default function App() {
               NATIVE_BIOMETRIC_SERVER,
 
             accessControl:
-              AccessControl.BIOMETRY_ANY,
-
-            authValidityDuration:
-              0,
-
-            title:
-              "Enable fingerprint login",
-
-            negativeButtonText:
-              "Cancel"
+              AccessControl.BIOMETRY_ANY
           }
         );
-
-        /*
-         * Confirm that the native credential store now contains the
-         * credential before marking the UI as enabled.
-         *
-         * This does not invoke the biometric prompt again; it only checks
-         * whether the credential record exists for our stable server key.
-         */
-        const saved =
-          await NativeBiometric.isCredentialsSaved(
-            {
-              server:
-                NATIVE_BIOMETRIC_SERVER
-            }
-          );
-
-        if (
-          !saved.isSaved
-        ) {
-          throw new Error(
-            "Android completed fingerprint authentication but did not confirm that the biometric login credential was saved."
-          );
-        }
 
         localStorage.setItem(
           NATIVE_BIOMETRIC_ENABLED_KEY,
@@ -2223,18 +2183,20 @@ export default function App() {
           true
         );
 
-        setMsg(
-          "Fingerprint login has been enabled on this Android device."
-        );
+        setBiometricFeedback({
+          type: "success",
+          text: "Fingerprint login has been enabled on this Android device."
+        });
       } catch (
         e: any
       ) {
-        setError(
-          getNativeBiometricErrorMessage(
+        setBiometricFeedback({
+          type: "error",
+          text: getNativeBiometricErrorMessage(
             e,
             "Unable to enable fingerprint login."
           )
-        );
+        });
       } finally {
         setBiometricBusy(
           false
@@ -2247,9 +2209,10 @@ export default function App() {
       if (
         !isNativeAndroidApp()
       ) {
-        setError(
-          "Native fingerprint login is only available inside the Android app."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Native fingerprint login is only available inside the Android app."
+        });
 
         return;
       }
@@ -2263,8 +2226,10 @@ export default function App() {
         return;
       }
 
-      setError("");
-      setMsg("");
+      setBiometricFeedback(
+        null
+      );
+
       setBiometricBusy(
         true
       );
@@ -2285,18 +2250,20 @@ export default function App() {
           false
         );
 
-        setMsg(
-          "Fingerprint login has been disabled on this Android device."
-        );
+        setBiometricFeedback({
+          type: "success",
+          text: "Fingerprint login has been disabled on this Android device."
+        });
       } catch (
         e: any
       ) {
-        setError(
-          getNativeBiometricErrorMessage(
+        setBiometricFeedback({
+          type: "error",
+          text: getNativeBiometricErrorMessage(
             e,
             "Unable to disable fingerprint login."
           )
-        );
+        });
       } finally {
         setBiometricBusy(
           false
@@ -2447,9 +2414,10 @@ export default function App() {
       if (
         !memberToken
       ) {
-        setError(
-          "Please log in with your password before enabling biometric/passkey login."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Please log in with your password before enabling biometric/passkey login."
+        });
 
         return;
       }
@@ -2457,15 +2425,18 @@ export default function App() {
       if (
         !webAuthnSupported
       ) {
-        setError(
-          "This browser does not support biometric/passkey login."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "This browser does not support biometric/passkey login."
+        });
 
         return;
       }
 
-      setError("");
-      setMsg("");
+      setBiometricFeedback(
+        null
+      );
+
       setBiometricBusy(
         true
       );
@@ -2519,19 +2490,22 @@ export default function App() {
           true
         );
 
-        setMsg(
-          verification.message ||
+        setBiometricFeedback({
+          type: "success",
+          text:
+            verification.message ||
             "Biometric/passkey login has been enabled on this device."
-        );
+        });
       } catch (
         e: any
       ) {
-        setError(
-          getWebAuthnErrorMessage(
+        setBiometricFeedback({
+          type: "error",
+          text: getWebAuthnErrorMessage(
             e,
             "Unable to enable biometric/passkey login."
           )
-        );
+        });
       } finally {
         setBiometricBusy(
           false
@@ -2544,9 +2518,10 @@ export default function App() {
       if (
         !memberToken
       ) {
-        setError(
-          "Please log in before disabling biometric/passkey login."
-        );
+        setBiometricFeedback({
+          type: "error",
+          text: "Please log in before disabling biometric/passkey login."
+        });
 
         return;
       }
@@ -2560,8 +2535,10 @@ export default function App() {
         return;
       }
 
-      setError("");
-      setMsg("");
+      setBiometricFeedback(
+        null
+      );
+
       setBiometricBusy(
         true
       );
@@ -2589,19 +2566,23 @@ export default function App() {
           false
         );
 
-        setMsg(
-          result.message ||
+        setBiometricFeedback({
+          type: "success",
+          text:
+            result.message ||
             "Biometric/passkey login has been disabled."
-        );
+        });
 
         await loadDashboard();
       } catch (
         e: any
       ) {
-        setError(
-          e.message ||
+        setBiometricFeedback({
+          type: "error",
+          text:
+            e.message ||
             "Unable to disable biometric/passkey login."
-        );
+        });
       } finally {
         setBiometricBusy(
           false
@@ -3003,19 +2984,65 @@ export default function App() {
           isNativeAndroidApp()
         ) {
           /*
-           * Android biometric UI state is controlled locally after a
-           * successful enable/disable operation. Do not run an async native
-           * credential-presence probe from every dashboard refresh; that probe
-           * can race with setup and overwrite the switch state.
+           * The local flag is deliberately the UI source of truth after a
+           * successful provisioning operation. Calling isCredentialsSaved()
+           * on every dashboard refresh can briefly return false while Android
+           * secure storage is settling, which would incorrectly switch the
+           * toggle back off immediately after a successful fingerprint setup.
            *
-           * Actual credential validity is enforced by getSecureCredentials()
-           * when the member attempts biometric login.
+           * When the local flag is already enabled, preserve it. The actual
+           * credential is still protected by Android and is validated when
+           * the member attempts fingerprint login.
            */
-          setBiometricEnabled(
+          const locallyEnabled =
             localStorage.getItem(
               NATIVE_BIOMETRIC_ENABLED_KEY
-            ) === "1"
-          );
+            ) === "1";
+
+          if (
+            locallyEnabled
+          ) {
+            setBiometricEnabled(
+              true
+            );
+          } else {
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                localStorage.removeItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY
+                );
+
+                setBiometricEnabled(
+                  false
+                );
+              }
+            } catch {
+              /*
+               * Do not change the existing UI state when the native
+               * credential check is temporarily unavailable. A failed
+               * status probe is not the same thing as a missing credential.
+               */
+            }
+          }
         } else {
           const backendPasskeyCount =
             Number(
@@ -4249,6 +4276,9 @@ function Dashboard({
           disableBiometricLogin={
             disableBiometricLogin
           }
+          biometricFeedback={
+            biometricFeedback
+          }
         />
       ) : (
         <main className="max-w-6xl mx-auto p-3 sm:p-5">
@@ -4826,7 +4856,8 @@ function ProfilePage({
   biometricBusy,
   biometricEnabled,
   enableBiometricLogin,
-  disableBiometricLogin
+  disableBiometricLogin,
+  biometricFeedback
 }: any) {
   const u =
     dashboard?.user ||
@@ -5458,25 +5489,14 @@ function ProfilePage({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="relative">
           <button
             type="button"
-            onClick={
-              openSupport
+            onClick={() =>
+              setShowMoreMenu(
+                v => !v
+              )
             }
-            className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-800 text-white font-bold text-sm hover:bg-blue-900 transition"
-          >
-            🛟 Contact Support
-          </button>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() =>
-                setShowMoreMenu(
-                  v => !v
-                )
-              }
             className="w-10 h-10 rounded-full border dark:border-slate-600 bg-white dark:bg-slate-900 text-xl font-black text-slate-700 dark:text-slate-200 flex items-center justify-center"
             aria-label="More profile options"
             title="More options"
@@ -5517,7 +5537,6 @@ function ProfilePage({
               </button>
             </div>
           )}
-          </div>
         </div>
       </div>
 
@@ -5823,27 +5842,19 @@ function ProfilePage({
                 ? "Use fingerprint for login on this device"
                 : "Use fingerprint or Face ID for login on this device"
             }
-            onClick={() => {
-              if (
-                biometricBusy
-              ) {
+            onClick={async () => {
+              if (biometricBusy) {
                 return;
               }
 
-              void (
-                biometricEnabled
-                  ? disableBiometricLogin()
-                  : enableBiometricLogin()
-              );
+              await (biometricEnabled
+                ? disableBiometricLogin()
+                : enableBiometricLogin());
             }}
-            aria-busy={
+            disabled={
               biometricBusy
             }
-            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-              biometricBusy
-                ? "cursor-wait opacity-60"
-                : "cursor-pointer"
-            } ${
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${
               biometricEnabled
                 ? "bg-blue-700"
                 : "bg-slate-300 dark:bg-slate-700"
@@ -5868,6 +5879,22 @@ function ProfilePage({
               : "Setting up biometric login..."}
           </p>
         )}
+
+        {!biometricBusy &&
+          biometricFeedback && (
+            <p
+              className={`text-xs mt-3 font-semibold ${
+                biometricFeedback.type ===
+                "error"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-green-600 dark:text-green-400"
+              }`}
+            >
+              {
+                biometricFeedback.text
+              }
+            </p>
+          )}
 
         {isNativeAndroid &&
           nativeBiometricAvailable &&
