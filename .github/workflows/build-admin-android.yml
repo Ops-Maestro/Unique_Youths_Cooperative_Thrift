@@ -2,7 +2,7 @@ name: Build Admin Android APK
 
 # Builds the admin web app, wraps it in the Capacitor Android shell, and
 # produces a real, installable APK - then publishes it to a separate
-# GitHub Release so there's a stable download link for the admin app.
+# GitHub Release, so there's a stable download link for the admin app.
 #
 # The admin Android project is generated during the workflow itself, so
 # Android Studio or a locally installed Android SDK is not required on the
