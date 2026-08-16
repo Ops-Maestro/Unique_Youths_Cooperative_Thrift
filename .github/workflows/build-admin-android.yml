@@ -161,13 +161,23 @@ jobs:
           name: unique-youths-admin-apk
           path: unique-youths-admin/apk-output/unique-youths-admin.apk
 
+      - name: Update Release Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -d latest-admin-android || true
+          git push origin :refs/tags/latest-admin-android || true
+          git tag latest-admin-android
+          git push origin latest-admin-android --force
+        working-directory: .
+
       - name: Publish to "latest-admin-android" release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-admin-android
           name: Latest Admin Android build
-          body: Automatically built from the latest `feature/secure-random-ajo-draw` branch. Downloaded via the admin app download link.
-          prerelease: true
+          body: Automatically built from the latest master branch. Downloaded via the admin app download link.
+          prerelease: false
           files: unique-youths-admin/apk-output/unique-youths-admin.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

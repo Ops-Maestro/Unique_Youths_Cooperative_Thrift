@@ -119,13 +119,23 @@ jobs:
           name: unique-youths-apk
           path: unique-youths-client/apk-output/unique-youths.apk
 
+      - name: Update Release Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -d latest-android || true
+          git push origin :refs/tags/latest-android || true
+          git tag latest-android
+          git push origin latest-android --force
+        working-directory: .
+
       - name: Publish to "latest" release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-android
           name: Latest Android build
-          body: Automatically built from the latest `feature/secure-random-ajo-draw` branch. Downloaded via the "Download our app" link in the web app.
-          prerelease: true
+          body: Automatically built from the latest `master` branch. Downloaded via the "Download our app" link in the web app.
+          prerelease: false
           files: unique-youths-client/apk-output/unique-youths.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
