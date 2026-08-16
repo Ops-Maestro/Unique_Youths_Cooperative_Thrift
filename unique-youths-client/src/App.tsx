@@ -2983,13 +2983,32 @@ export default function App() {
                   true
                 );
               } else {
-                localStorage.removeItem(
-                  NATIVE_BIOMETRIC_ENABLED_KEY
-                );
+                /*
+                 * Re-read the latest persisted state after the async native
+                 * check. A dashboard refresh may have started before the
+                 * member enabled fingerprint login and may therefore be
+                 * holding stale local state.
+                 *
+                 * If the setup has completed while this request was in
+                 * flight, preserve the newly enabled state rather than
+                 * switching the toggle back OFF.
+                 */
+                const latestEnabledState =
+                  localStorage.getItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  ) === "1";
 
-                setBiometricEnabled(
-                  false
-                );
+                if (
+                  latestEnabledState
+                ) {
+                  setBiometricEnabled(
+                    true
+                  );
+                } else {
+                  setBiometricEnabled(
+                    false
+                  );
+                }
               }
             } catch {
               /*
@@ -5441,14 +5460,25 @@ function ProfilePage({
           </div>
         </div>
 
-        <div className="relative">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() =>
-              setShowMoreMenu(
-                v => !v
-              )
+            onClick={
+              openSupport
             }
+            className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-800 text-white font-bold text-sm hover:bg-blue-900 transition"
+          >
+            🛟 Contact Support
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() =>
+                setShowMoreMenu(
+                  v => !v
+                )
+              }
             className="w-10 h-10 rounded-full border dark:border-slate-600 bg-white dark:bg-slate-900 text-xl font-black text-slate-700 dark:text-slate-200 flex items-center justify-center"
             aria-label="More profile options"
             title="More options"
@@ -5489,6 +5519,7 @@ function ProfilePage({
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -5794,19 +5825,29 @@ function ProfilePage({
                 ? "Use fingerprint for login on this device"
                 : "Use fingerprint or Face ID for login on this device"
             }
-            onClick={async () => {
-              if (biometricBusy) {
+            onClick={() => {
+              if (
+                biometricBusy
+              ) {
                 return;
               }
 
-              await (biometricEnabled
-                ? disableBiometricLogin()
-                : enableBiometricLogin());
+              if (
+                biometricEnabled
+              ) {
+                void disableBiometricLogin();
+              } else {
+                void enableBiometricLogin();
+              }
             }}
-            disabled={
+            aria-busy={
               biometricBusy
             }
-            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+              biometricBusy
+                ? "cursor-wait opacity-60"
+                : "cursor-pointer"
+            } ${
               biometricEnabled
                 ? "bg-blue-700"
                 : "bg-slate-300 dark:bg-slate-700"
