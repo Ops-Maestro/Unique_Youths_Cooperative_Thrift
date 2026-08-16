@@ -94,6 +94,18 @@ const HAS_REGISTERED_KEY =
 const THEME_KEY =
   "uy_theme";
 
+const SUPPORT_PHONE =
+  String(
+    (import.meta as any).env?.VITE_SUPPORT_PHONE ||
+      ""
+  ).trim();
+
+const SUPPORT_PHONE_TEL =
+  SUPPORT_PHONE.replace(
+    /[^+0-9]/g,
+    ""
+  );
+
 const TOKEN_KEY =
   "memberToken";
 
@@ -990,66 +1002,6 @@ const STATUS_FONT = {
   fontFamily:
     "'FreeMono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 };
-
-function Ticker({
-  announcements
-}: {
-  announcements: any[];
-}) {
-  const tickerItems =
-    announcements?.filter(
-      (a: any) =>
-        a.type !==
-          "party_banner" &&
-        a.type !==
-          "app_update"
-    ) || [];
-
-  const hasItems =
-    tickerItems.length >
-    0;
-
-  const text = hasItems
-    ? tickerItems
-        .map(
-          (a: any) =>
-            a.description
-        )
-        .join(
-          "     •     "
-        )
-    : "No new announcements";
-
-  const duration =
-    Math.max(
-      14,
-      Math.min(
-        90,
-        text.length *
-          0.19
-      )
-    );
-
-  return (
-    <div className="bg-slate-900 text-white overflow-hidden py-2">
-      {hasItems ? (
-        <div
-          className="inline-block whitespace-nowrap animate-marquee"
-          style={{
-            animationDuration:
-              `${duration}s`
-          }}
-        >
-          {text}
-        </div>
-      ) : (
-        <div className="px-4 text-slate-400">
-          {text}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function AppUpdateBanner({
   announcements
@@ -2174,6 +2126,17 @@ export default function App() {
           }
         );
 
+        /*
+         * setCredentials() is the native provisioning step.
+         * With BIOMETRY_ANY the Android plugin protects the stored
+         * credentials with the device biometric keystore. The native
+         * fingerprint prompt is therefore expected during this call.
+         *
+         * Once it resolves successfully, treat the credential as enabled
+         * and persist that state locally. We intentionally do not call
+         * getSecureCredentials() here because that would trigger a second
+         * fingerprint prompt immediately after successful setup.
+         */
         await NativeBiometric.setCredentials(
           {
             username,
@@ -2188,13 +2151,6 @@ export default function App() {
           }
         );
 
-        /*
-         * setCredentials() resolving is the successful provisioning point.
-         * Do not immediately call isCredentialsSaved() here as a gate for
-         * the UI state. The plugin documents isCredentialsSaved() as a
-         * presence check, while getSecureCredentials() is the biometric-
-         * protected retrieval path used during actual login.
-         */
         localStorage.setItem(
           NATIVE_BIOMETRIC_ENABLED_KEY,
           "1"
@@ -2374,11 +2330,43 @@ export default function App() {
       } catch (
         e: any
       ) {
-        setError(
+        const message =
           getNativeBiometricErrorMessage(
             e,
             "Fingerprint authentication failed."
+          );
+
+        /*
+         * If the secure credential no longer exists, clear the local flag so
+         * the member can provision fingerprint login again from Profile.
+         */
+        if (
+          String(
+            e?.message ||
+              e ||
+              ""
           )
+            .toLowerCase()
+            .includes("credential") ||
+          String(
+            e?.message ||
+              e ||
+              ""
+          )
+            .toLowerCase()
+            .includes("saved")
+        ) {
+          localStorage.removeItem(
+            NATIVE_BIOMETRIC_ENABLED_KEY
+          );
+
+          setBiometricEnabled(
+            false
+          );
+        }
+
+        setError(
+          message
         );
       } finally {
         setBiometricBusy(
@@ -2952,28 +2940,87 @@ export default function App() {
           isNativeAndroidApp()
         ) {
           /*
-           * Android biometric state is intentionally driven by the local
-           * device enrollment flag.
+           * The local flag is deliberately the UI source of truth after a
+           * successful provisioning operation. Calling isCredentialsSaved()
+           * on every dashboard refresh can briefly return false while Android
+           * secure storage is settling, which would incorrectly switch the
+           * toggle back off immediately after a successful fingerprint setup.
            *
-           * The native credential store is not used as a hard gate here.
-           * Some Android/plugin states can transiently report
-           * isCredentialsSaved=false even though setCredentials() has
-           * already completed successfully. Treating that response as
-           * authoritative was causing the UI toggle to switch back OFF
-           * immediately after a successful fingerprint setup.
-           *
-           * The actual biometric login path remains authoritative:
-           * getSecureCredentials() must successfully retrieve the
-           * protected credentials before login can proceed.
+           * When the local flag is already enabled, preserve it. The actual
+           * credential is still protected by Android and is validated when
+           * the member attempts fingerprint login.
            */
           const locallyEnabled =
             localStorage.getItem(
               NATIVE_BIOMETRIC_ENABLED_KEY
             ) === "1";
 
-          setBiometricEnabled(
+          if (
             locallyEnabled
-          );
+          ) {
+            setBiometricEnabled(
+              true
+            );
+          } else {
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                /*
+                 * Re-read the local flag after the async native check.
+                 *
+                 * A dashboard refresh can already be in flight while the
+                 * member is enabling fingerprint login. If the fingerprint
+                 * setup finishes during that request, the earlier
+                 * locallyEnabled value is stale. Do not let that stale
+                 * request switch the newly-enabled toggle back OFF.
+                 */
+                const enabledAfterCheck =
+                  localStorage.getItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  ) === "1";
+
+                if (
+                  enabledAfterCheck
+                ) {
+                  setBiometricEnabled(
+                    true
+                  );
+                } else {
+                  localStorage.removeItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  );
+
+                  setBiometricEnabled(
+                    false
+                  );
+                }
+              }
+            } catch {
+              /*
+               * Do not change the existing UI state when the native
+               * credential check is temporarily unavailable. A failed
+               * status probe is not the same thing as a missing credential.
+               */
+            }
+          }
         } else {
           const backendPasskeyCount =
             Number(
@@ -4153,12 +4200,6 @@ function Dashboard({
           />
         </div>
       </header>
-
-      <Ticker
-        announcements={
-          announcements
-        }
-      />
 
       <PartyBanner
         announcements={
@@ -5781,14 +5822,11 @@ function ProfilePage({
               }
 
               await (biometricEnabled
-                ? disableBiometricLogin
-                : enableBiometricLogin);
+                ? disableBiometricLogin()
+                : enableBiometricLogin());
             }}
             disabled={
-              biometricBusy ||
-              (isNativeAndroid
-                ? !nativeFingerprintAvailable
-                : !webAuthnSupported)
+              biometricBusy
             }
             className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-50 ${
               biometricEnabled
@@ -5962,7 +6000,7 @@ function ProfilePage({
           }
         >
           <div
-            className="relative w-full max-w-2xl flex flex-col items-center justify-center gap-3"
+            className="relative w-full max-w-6xl flex flex-col items-center justify-center gap-3"
             onClick={e =>
               e.stopPropagation()
             }
@@ -5973,7 +6011,7 @@ function ProfilePage({
                   avatarPreview
                 }
                 alt="Your profile"
-                className="max-h-[78vh] max-w-full rounded-2xl border-2 border-white/80 object-contain shadow-2xl"
+                className="h-[82vh] w-auto max-h-[82vh] max-w-[90vw] rounded-2xl border-2 border-white/80 object-contain shadow-2xl"
               />
             ) : (
               <div className="w-56 h-56 rounded-full bg-blue-800 text-white flex items-center justify-center text-8xl font-black border-2 border-white/80">
@@ -6174,6 +6212,36 @@ function ProfilePage({
                 </p>
               </div>
 
+              {SUPPORT_PHONE && (
+                <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 p-4 bg-white dark:bg-slate-800/60">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Call the administrator directly
+                  </p>
+
+                  <a
+                    href={
+                      SUPPORT_PHONE_TEL
+                        ? `tel:${SUPPORT_PHONE_TEL}`
+                        : `tel:${SUPPORT_PHONE}`
+                    }
+                    className="mt-1 inline-block text-lg font-black text-blue-800 dark:text-blue-300 break-all"
+                  >
+                    {SUPPORT_PHONE}
+                  </a>
+
+                  <a
+                    href={
+                      SUPPORT_PHONE_TEL
+                        ? `tel:${SUPPORT_PHONE_TEL}`
+                        : `tel:${SUPPORT_PHONE}`
+                    }
+                    className="mt-3 inline-flex w-full items-center justify-center py-3 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 transition"
+                  >
+                    📞 Call support
+                  </a>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={
@@ -6186,7 +6254,7 @@ function ProfilePage({
               >
                 {supportBusy
                   ? "Sending..."
-                  : "Contact support"}
+                  : "Send support request by email"}
               </button>
             </div>
           </div>
