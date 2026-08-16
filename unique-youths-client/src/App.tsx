@@ -2983,35 +2983,13 @@ export default function App() {
                   true
                 );
               } else {
-                /*
-                 * Re-read the local flag after the async native check.
-                 *
-                 * A dashboard refresh can already be in flight while the
-                 * member is enabling fingerprint login. If the fingerprint
-                 * setup finishes during that request, the earlier
-                 * locallyEnabled value is stale. Do not let that stale
-                 * request switch the newly-enabled toggle back OFF.
-                 */
-                const enabledAfterCheck =
-                  localStorage.getItem(
-                    NATIVE_BIOMETRIC_ENABLED_KEY
-                  ) === "1";
+                localStorage.removeItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY
+                );
 
-                if (
-                  enabledAfterCheck
-                ) {
-                  setBiometricEnabled(
-                    true
-                  );
-                } else {
-                  localStorage.removeItem(
-                    NATIVE_BIOMETRIC_ENABLED_KEY
-                  );
-
-                  setBiometricEnabled(
-                    false
-                  );
-                }
+                setBiometricEnabled(
+                  false
+                );
               }
             } catch {
               /*
