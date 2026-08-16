@@ -3,14 +3,19 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.js", "dev": "node --watch server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "backfill:cycle1": "node scripts/backfill-cycle-1-payouts.js"
+  },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.0",
     "mongoose": "^8.18.0",
     "resend": "^6.0.0"
   }

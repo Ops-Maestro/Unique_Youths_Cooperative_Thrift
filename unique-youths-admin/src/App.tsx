@@ -47,7 +47,7 @@ type TabId = (typeof TABS)[number]["id"];
 // their own session open in separate tabs of the same browser without one
 // overwriting the other.
 const TOKEN_KEY = "adminToken";
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.3.0";
 
 function useTheme() {
   const [theme, setTheme] = useState<Theme>((localStorage.getItem("uy_admin_theme") as Theme) || "system");

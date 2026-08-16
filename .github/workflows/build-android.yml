@@ -124,7 +124,7 @@ jobs:
         with:
           tag_name: latest-android
           name: Latest Android build
-          body: Automatically built from the latest `master` branch. Downloaded via the "Download our app" link in the web app.
+          body: Automatically built from the latest `feature/secure-random-ajo-draw` branch. Downloaded via the "Download our app" link in the web app.
           prerelease: true
           files: unique-youths-client/apk-output/unique-youths.apk
         env:

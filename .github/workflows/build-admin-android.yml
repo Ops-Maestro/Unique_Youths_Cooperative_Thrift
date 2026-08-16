@@ -166,7 +166,7 @@ jobs:
         with:
           tag_name: latest-admin-android
           name: Latest Admin Android build
-          body: Automatically built from the latest `master` branch. Downloaded via the admin app download link.
+          body: Automatically built from the latest `feature/secure-random-ajo-draw` branch. Downloaded via the admin app download link.
           prerelease: true
           files: unique-youths-admin/apk-output/unique-youths-admin.apk
         env:
