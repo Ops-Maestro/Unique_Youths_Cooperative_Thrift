@@ -1720,6 +1720,53 @@ export default function App() {
               false
             );
 
+            // ✅ CHECK FOR EXISTING CREDENTIALS ON LOGIN SCREEN
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (!mounted)
+                return;
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                // If local flag says enabled but credentials aren't saved, clean up
+                const localEnabled =
+                  localStorage.getItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  ) === "1";
+
+                if (
+                  localEnabled
+                ) {
+                  localStorage.removeItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  );
+
+                  setBiometricEnabled(
+                    false
+                  );
+                }
+              }
+            } catch {
+              // Credential check failed - keep current state
+            }
+
             return;
           } catch {
             if (!mounted)
@@ -2060,46 +2107,15 @@ export default function App() {
         return;
       }
 
-      let nativeAvailability: any;
-
-      try {
-        nativeAvailability =
-          await NativeBiometric.isAvailable(
-            {
-              useFallback:
-                false
-            }
-          );
-      } catch (
-        e: any
-      ) {
-        setError(
-          getNativeBiometricErrorMessage(
-            e,
-            "Android biometric authentication is not available on this device."
-          )
-        );
-
-        return;
-      }
-
       if (
-        !nativeAvailability?.isAvailable
+        !nativeFingerprintAvailable
       ) {
         setError(
-          "Fingerprint authentication is not available on this Android device. Register a fingerprint in Android Settings and try again."
+          "A fingerprint is not currently available on this Android device. Register a fingerprint in Android Settings and try again."
         );
 
         return;
       }
-
-      setNativeBiometricAvailable(
-        true
-      );
-
-      setNativeFingerprintAvailable(
-        true
-      );
 
       const username =
         String(
@@ -2178,41 +2194,9 @@ export default function App() {
               NATIVE_BIOMETRIC_SERVER,
 
             accessControl:
-              AccessControl.BIOMETRY_ANY,
-
-            authValidityDuration:
-              0,
-
-            title:
-              "Enable fingerprint login",
-
-            negativeButtonText:
-              "Cancel"
+              AccessControl.BIOMETRY_ANY
           }
         );
-
-        /*
-         * Confirm that the native credential store now contains the
-         * credential before marking the UI as enabled.
-         *
-         * This does not invoke the biometric prompt again; it only checks
-         * whether the credential record exists for our stable server key.
-         */
-        const saved =
-          await NativeBiometric.isCredentialsSaved(
-            {
-              server:
-                NATIVE_BIOMETRIC_SERVER
-            }
-          );
-
-        if (
-          !saved.isSaved
-        ) {
-          throw new Error(
-            "Android completed fingerprint authentication but did not confirm that the biometric login credential was saved."
-          );
-        }
 
         localStorage.setItem(
           NATIVE_BIOMETRIC_ENABLED_KEY,
@@ -3003,19 +2987,84 @@ export default function App() {
           isNativeAndroidApp()
         ) {
           /*
-           * Android biometric UI state is controlled locally after a
-           * successful enable/disable operation. Do not run an async native
-           * credential-presence probe from every dashboard refresh; that probe
-           * can race with setup and overwrite the switch state.
+           * The local flag is deliberately the UI source of truth after a
+           * successful provisioning operation. Calling isCredentialsSaved()
+           * on every dashboard refresh can briefly return false while Android
+           * secure storage is settling, which would incorrectly switch the
+           * toggle back off immediately after a successful fingerprint setup.
            *
-           * Actual credential validity is enforced by getSecureCredentials()
-           * when the member attempts biometric login.
+           * When the local flag is already enabled, preserve it. The actual
+           * credential is still protected by Android and is validated when
+           * the member attempts fingerprint login.
            */
-          setBiometricEnabled(
+          const locallyEnabled =
             localStorage.getItem(
               NATIVE_BIOMETRIC_ENABLED_KEY
-            ) === "1"
-          );
+            ) === "1";
+
+          if (
+            locallyEnabled
+          ) {
+            setBiometricEnabled(
+              true
+            );
+          } else {
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                /*
+                 * Re-read the latest persisted state after the async native
+                 * check. A dashboard refresh may have started before the
+                 * member enabled fingerprint login and may therefore be
+                 * holding stale local state.
+                 *
+                 * If the setup has completed while this request was in
+                 * flight, preserve the newly enabled state rather than
+                 * switching the toggle back OFF.
+                 */
+                const latestEnabledState =
+                  localStorage.getItem(
+                    NATIVE_BIOMETRIC_ENABLED_KEY
+                  ) === "1";
+
+                if (
+                  latestEnabledState
+                ) {
+                  setBiometricEnabled(
+                    true
+                  );
+                } else {
+                  setBiometricEnabled(
+                    false
+                  );
+                }
+              }
+            } catch {
+              /*
+               * Do not change the existing UI state when the native
+               * credential check is temporarily unavailable. A failed
+               * status probe is not the same thing as a missing credential.
+               */
+            }
+          }
         } else {
           const backendPasskeyCount =
             Number(
@@ -5830,11 +5879,13 @@ function ProfilePage({
                 return;
               }
 
-              void (
+              if (
                 biometricEnabled
-                  ? disableBiometricLogin()
-                  : enableBiometricLogin()
-              );
+              ) {
+                void disableBiometricLogin();
+              } else {
+                void enableBiometricLogin();
+              }
             }}
             aria-busy={
               biometricBusy
