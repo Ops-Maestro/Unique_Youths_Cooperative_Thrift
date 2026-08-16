@@ -94,6 +94,18 @@ const HAS_REGISTERED_KEY =
 const THEME_KEY =
   "uy_theme";
 
+const SUPPORT_PHONE =
+  String(
+    (import.meta as any).env?.VITE_SUPPORT_PHONE ||
+      ""
+  ).trim();
+
+const SUPPORT_PHONE_TEL =
+  SUPPORT_PHONE.replace(
+    /[^+0-9]/g,
+    ""
+  );
+
 const TOKEN_KEY =
   "memberToken";
 
@@ -2114,6 +2126,17 @@ export default function App() {
           }
         );
 
+        /*
+         * setCredentials() is the native provisioning step.
+         * With BIOMETRY_ANY the Android plugin protects the stored
+         * credentials with the device biometric keystore. The native
+         * fingerprint prompt is therefore expected during this call.
+         *
+         * Once it resolves successfully, treat the credential as enabled
+         * and persist that state locally. We intentionally do not call
+         * getSecureCredentials() here because that would trigger a second
+         * fingerprint prompt immediately after successful setup.
+         */
         await NativeBiometric.setCredentials(
           {
             username,
@@ -2307,11 +2330,43 @@ export default function App() {
       } catch (
         e: any
       ) {
-        setError(
+        const message =
           getNativeBiometricErrorMessage(
             e,
             "Fingerprint authentication failed."
+          );
+
+        /*
+         * If the secure credential no longer exists, clear the local flag so
+         * the member can provision fingerprint login again from Profile.
+         */
+        if (
+          String(
+            e?.message ||
+              e ||
+              ""
           )
+            .toLowerCase()
+            .includes("credential") ||
+          String(
+            e?.message ||
+              e ||
+              ""
+          )
+            .toLowerCase()
+            .includes("saved")
+        ) {
+          localStorage.removeItem(
+            NATIVE_BIOMETRIC_ENABLED_KEY
+          );
+
+          setBiometricEnabled(
+            false
+          );
+        }
+
+        setError(
+          message
         );
       } finally {
         setBiometricBusy(
@@ -2884,39 +2939,65 @@ export default function App() {
         if (
           isNativeAndroidApp()
         ) {
-          try {
-            const saved =
-              await NativeBiometric.isCredentialsSaved(
-                {
-                  server:
-                    NATIVE_BIOMETRIC_SERVER
-                }
-              );
+          /*
+           * The local flag is deliberately the UI source of truth after a
+           * successful provisioning operation. Calling isCredentialsSaved()
+           * on every dashboard refresh can briefly return false while Android
+           * secure storage is settling, which would incorrectly switch the
+           * toggle back off immediately after a successful fingerprint setup.
+           *
+           * When the local flag is already enabled, preserve it. The actual
+           * credential is still protected by Android and is validated when
+           * the member attempts fingerprint login.
+           */
+          const locallyEnabled =
+            localStorage.getItem(
+              NATIVE_BIOMETRIC_ENABLED_KEY
+            ) === "1";
 
-            if (
-              saved.isSaved
-            ) {
-              localStorage.setItem(
-                NATIVE_BIOMETRIC_ENABLED_KEY,
-                "1"
-              );
-
-              setBiometricEnabled(
-                true
-              );
-            } else {
-              localStorage.removeItem(
-                NATIVE_BIOMETRIC_ENABLED_KEY
-              );
-
-              setBiometricEnabled(
-                false
-              );
-            }
-          } catch {
+          if (
+            locallyEnabled
+          ) {
             setBiometricEnabled(
-              false
+              true
             );
+          } else {
+            try {
+              const saved =
+                await NativeBiometric.isCredentialsSaved(
+                  {
+                    server:
+                      NATIVE_BIOMETRIC_SERVER
+                  }
+                );
+
+              if (
+                saved.isSaved
+              ) {
+                localStorage.setItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY,
+                  "1"
+                );
+
+                setBiometricEnabled(
+                  true
+                );
+              } else {
+                localStorage.removeItem(
+                  NATIVE_BIOMETRIC_ENABLED_KEY
+                );
+
+                setBiometricEnabled(
+                  false
+                );
+              }
+            } catch {
+              /*
+               * Do not change the existing UI state when the native
+               * credential check is temporarily unavailable. A failed
+               * status probe is not the same thing as a missing credential.
+               */
+            }
           }
         } else {
           const backendPasskeyCount =
@@ -6109,6 +6190,36 @@ function ProfilePage({
                 </p>
               </div>
 
+              {SUPPORT_PHONE && (
+                <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 p-4 bg-white dark:bg-slate-800/60">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Call the administrator directly
+                  </p>
+
+                  <a
+                    href={
+                      SUPPORT_PHONE_TEL
+                        ? `tel:${SUPPORT_PHONE_TEL}`
+                        : `tel:${SUPPORT_PHONE}`
+                    }
+                    className="mt-1 inline-block text-lg font-black text-blue-800 dark:text-blue-300 break-all"
+                  >
+                    {SUPPORT_PHONE}
+                  </a>
+
+                  <a
+                    href={
+                      SUPPORT_PHONE_TEL
+                        ? `tel:${SUPPORT_PHONE_TEL}`
+                        : `tel:${SUPPORT_PHONE}`
+                    }
+                    className="mt-3 inline-flex w-full items-center justify-center py-3 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 transition"
+                  >
+                    📞 Call support
+                  </a>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={
@@ -6121,7 +6232,7 @@ function ProfilePage({
               >
                 {supportBusy
                   ? "Sending..."
-                  : "Contact support"}
+                  : "Send support request by email"}
               </button>
             </div>
           </div>

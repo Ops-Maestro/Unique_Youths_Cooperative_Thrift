@@ -4,8 +4,15 @@ import {
   NativeBiometric
 } from "@capgo/capacitor-native-biometric";
 
-const BIOMETRIC_SERVER =
-  import.meta.env.VITE_API_URL ||
+/*
+ * Stable credential namespace used by the native biometric store.
+ *
+ * IMPORTANT:
+ * This is an application identifier, not the backend URL. It must remain
+ * stable across environments and app builds so credentials can be found
+ * again on the same device.
+ */
+export const BIOMETRIC_SERVER =
   "unique-youth-cooperative-thrift";
 
 export function isNativeMobileApp() {
@@ -48,7 +55,8 @@ export async function hasNativeBiometricCredentials() {
     const result =
       await NativeBiometric.isCredentialsSaved(
         {
-          server: BIOMETRIC_SERVER
+          server:
+            BIOMETRIC_SERVER
         }
       );
 
@@ -86,20 +94,16 @@ export async function saveNativeBiometricCredentials(
   }
 
   /*
-   * Store the member credentials inside Android Keystore-protected
-   * storage. The credentials cannot be retrieved without biometric
-   * authentication.
-   *
-   * BIOMETRY_ANY means the credentials remain valid when the user
-   * adds another fingerprint later.
-   *
-   * authValidityDuration: 0 means every secure read requires a
-   * fresh biometric authentication.
+   * The successful biometric prompt belongs to setCredentials().
+   * Once this call resolves, the credential has been accepted by the native
+   * plugin. The caller should persist its own local UI state and validate the
+   * credential later through the real biometric login path.
    */
   await NativeBiometric.setCredentials({
     username,
     password,
-    server: BIOMETRIC_SERVER,
+    server:
+      BIOMETRIC_SERVER,
     accessControl:
       AccessControl.BIOMETRY_ANY,
     authValidityDuration: 0,
@@ -117,7 +121,8 @@ export async function disableNativeBiometricCredentials() {
 
   await NativeBiometric.deleteCredentials(
     {
-      server: BIOMETRIC_SERVER
+      server:
+        BIOMETRIC_SERVER
     }
   );
 }
@@ -147,11 +152,8 @@ export async function loginWithNativeBiometric() {
   }
 
   /*
-   * The plugin performs the native BiometricPrompt verification
-   * before decrypting the credentials.
-   *
-   * No Google Password Manager / WebAuthn passkey selection is
-   * involved here.
+   * The plugin performs the native BiometricPrompt verification before
+   * releasing the encrypted credentials.
    */
   const credentials =
     await NativeBiometric.getSecureCredentials(
