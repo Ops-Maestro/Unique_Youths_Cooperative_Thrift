@@ -5,7 +5,7 @@ import {
   type ChangeEvent
 } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { App } from "@capacitor/app";
+import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 
 import {
@@ -1186,25 +1186,28 @@ function PartyBanner({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-5 bg-black/70">
-      <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full p-6 sm:p-12 text-center border-4 border-double border-red-600/50 dark:border-red-400/50 overflow-x-hidden break-words">
+      <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-4 sm:p-8 md:p-10 text-center border-4 border-double border-red-600/50 dark:border-red-400/50">
         <button
           type="button"
           onClick={dismiss}
           aria-label="Close"
-          className="absolute top-4 right-5 text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-2xl leading-none font-bold"
+          className="sticky top-0 float-right ml-auto text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-2xl font-bold z-10 bg-white dark:bg-slate-900 px-2"
         >
           ×
         </button>
 
-        <span className="block text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none">
+
+        <div className="clear-both" />
+
+        <span className="block text-5xl sm:text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none">
           "
         </span>
 
-        <h2 className="text-3xl sm:text-4xl font-black text-red-700 dark:text-red-400 -mt-4 uppercase tracking-wide">
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-red-700 dark:text-red-400 -mt-3 sm:-mt-4 uppercase tracking-wide">
           🎉 Party Time!
         </h2>
 
-        <p className="text-xl sm:text-2xl font-semibold text-slate-800 dark:text-slate-100 mt-8 leading-relaxed">
+        <p className="text-base sm:text-lg md:text-xl font-semibold text-slate-800 dark:text-slate-100 mt-4 sm:mt-6 leading-relaxed break-words">
           {banner.description}
         </p>
 
@@ -1212,14 +1215,14 @@ function PartyBanner({
           banner.venue ||
           banner.eventDate
         ) && (
-          <div className="mt-8 space-y-5 text-lg sm:text-xl font-bold text-slate-800 dark:text-slate-100">
+          <div className="mt-4 sm:mt-6 space-y-3 sm:space-y-4 text-sm sm:text-base md:text-lg font-bold text-slate-800 dark:text-slate-100">
             {banner.venue && (
-              <div className="flex items-start justify-center gap-3">
-                <span className="text-2xl shrink-0">
+              <div className="flex items-start justify-center gap-2 sm:gap-3 px-1">
+                <span className="text-xl sm:text-2xl shrink-0">
                   📍
                 </span>
 
-                <span className="break-words">
+                <span className="text-left break-words max-w-[80%] sm:max-w-[90%] word-break">
                   {
                     banner.venue
                   }
@@ -1228,12 +1231,12 @@ function PartyBanner({
             )}
 
             {banner.eventDate && (
-              <div className="flex items-start justify-center gap-3">
-                <span className="text-2xl shrink-0">
+              <div className="flex items-start justify-center gap-2 sm:gap-3 px-1">
+                <span className="text-xl sm:text-2xl shrink-0">
                   🗓️
                 </span>
 
-                <span className="break-words">
+                <span className="text-left break-words max-w-[80%] sm:max-w-[90%] word-break">
                   {new Date(
                     banner.eventDate
                   ).toLocaleString(
@@ -1251,23 +1254,23 @@ function PartyBanner({
           </div>
         )}
 
-        <span className="block text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none rotate-180 mt-6">
+        <span className="block text-5xl sm:text-6xl text-red-600/20 dark:text-red-400/20 font-black leading-none rotate-180 mt-4 sm:mt-6">
           "
         </span>
 
-        <div className="flex items-center justify-center gap-3 mt-8 pt-6 border-t dark:border-slate-700">
+        <div className="flex items-center justify-center gap-3 mt-4 sm:mt-6 pt-4 sm:pt-6 border-t dark:border-slate-700">
           <img
             src="/brand/logo-badge.png"
             alt=""
-            className="w-12 h-12"
+            className="w-10 h-10 sm:w-12 sm:h-12"
           />
 
           <div className="text-left">
-            <p className="font-black text-lg text-slate-900 dark:text-white leading-tight">
+            <p className="font-black text-sm sm:text-lg text-slate-900 dark:text-white leading-tight">
               Unique Youth
             </p>
 
-            <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
               Cooperative Thrift Club
             </p>
           </div>
@@ -3192,7 +3195,7 @@ export default function App() {
 
     let listener: any = null;
     try {
-      listener = App.addListener("backButton", handler);
+      const listener = CapacitorApp.addListener("backButton", handler);
     } catch (e) {
       // Ignore if not available (web fallback)
     }
