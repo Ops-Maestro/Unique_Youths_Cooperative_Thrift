@@ -1185,7 +1185,7 @@ function PartyBanner({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-5 bg-black/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70">
       <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-4 sm:p-8 md:p-10 text-center border-4 border-double border-red-600/50 dark:border-red-400/50">
         <button
           type="button"
@@ -1195,7 +1195,6 @@ function PartyBanner({
         >
           ×
         </button>
-
 
         <div className="clear-both" />
 
@@ -3195,7 +3194,7 @@ export default function App() {
 
     let listener: any = null;
     try {
-      const listener = CapacitorApp.addListener("backButton", handler);
+      listener = CapacitorApp.addListener("backButton", handler);
     } catch (e) {
       // Ignore if not available (web fallback)
     }
@@ -3252,7 +3251,7 @@ export default function App() {
 
       return (
         <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-          <header className={`bg-blue-800 text-white px-3 sm:px-5 py-3 sm:py-4 flex justify-between items-center gap-3 flex-wrap sticky top-0 z-50 transition-transform duration-300 ${
+          <header className={`bg-blue-800 text-white px-3 sm:px-5 py-3 sm:py-4 flex justify-between items-center gap-3 flex-wrap fixed top-0 left-0 right-0 z-50 transition-transform duration-300 ${
             headerVisible ? "translate-y-0" : "-translate-y-full"
           }`}>
             <Brand />
@@ -4303,7 +4302,7 @@ function Dashboard({
         }
       />
 
-      <header className={`bg-blue-800 text-white px-3 sm:px-4 py-3 sm:py-4 sticky top-0 z-50 transition-transform duration-300 ${
+      <header className={`bg-blue-800 text-white px-3 sm:px-4 py-3 sm:py-4 fixed top-0 left-0 right-0 z-50 transition-transform duration-300 will-change-transform ${
         headerVisible ? "translate-y-0" : "-translate-y-full"
       }`}>
         <div className="flex items-center justify-between gap-3">
