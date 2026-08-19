@@ -1186,7 +1186,7 @@ function PartyBanner({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-5 bg-black/70">
-      <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full p-6 sm:p-12 text-center border-4 border-double border-red-600/50 dark:border-red-400/50">
+      <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-3xl w-full p-6 sm:p-12 text-center border-4 border-double border-red-600/50 dark:border-red-400/50 overflow-x-hidden break-words">
         <button
           type="button"
           onClick={dismiss}
@@ -1219,7 +1219,7 @@ function PartyBanner({
                   📍
                 </span>
 
-                <span>
+                <span className="break-words">
                   {
                     banner.venue
                   }
@@ -1233,7 +1233,7 @@ function PartyBanner({
                   🗓️
                 </span>
 
-                <span>
+                <span className="break-words">
                   {new Date(
                     banner.eventDate
                   ).toLocaleString(
