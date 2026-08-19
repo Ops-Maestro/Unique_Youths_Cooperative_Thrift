@@ -441,7 +441,7 @@ function PayoutSummaryCard({
 
       <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">
         Maintenance fee follows the circle-size rule:
-        ₦500 × ceil(circle size ÷ 2).
+        ₦500 × max(3, ceil(circle size ÷ 2)) × 2.
       </p>
     </div>
   );
@@ -1845,10 +1845,11 @@ export default function AjoRecipientDraw({
                   <p className="text-lg font-black text-red-600 dark:text-red-400 mt-1">
                     {formatNaira(
                       500 *
-                        Math.ceil(
-                          active.baselineSize /
-                            2
-                        )
+                        Math.max(
+                          3,
+                          Math.ceil(active.baselineSize / 2)
+                        ) *
+                        2
                     )}
                   </p>
                 </div>

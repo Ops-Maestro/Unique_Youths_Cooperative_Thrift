@@ -105,8 +105,8 @@ export async function saveNativeBiometricCredentials(
     server:
       BIOMETRIC_SERVER,
     accessControl:
-      AccessControl.BIOMETRY_ANY,
-    authValidityDuration: 0,
+      AccessControl.BIOMETRY_CURRENT_SET, // stronger security – requires the currently enrolled biometrics
+    authValidityDuration: 60, // 60 seconds validity after biometric verification
     title:
       "Enable fingerprint login",
     negativeButtonText:

@@ -3,10 +3,13 @@ import {
   useState
 } from "react";
 import {
+  CheckCircle2,
+  Clock3,
   Lock,
   RotateCcw,
   Trash2,
-  X
+  X,
+  XCircle
 } from "lucide-react";
 import { api } from "../lib/api";
 import {
@@ -29,8 +32,28 @@ type Member = {
         lastName: string;
       }
     | string;
+
   numericId: number;
+
   disbursed: boolean;
+
+  paymentStatus?:
+    | "unreported"
+    | "reported"
+    | "rejected"
+    | "paid";
+
+  paymentClaimId?:
+    | string
+    | null;
+
+  paymentClaimedAt?:
+    | string
+    | null;
+
+  paymentRejectionReason?:
+    | string
+    | null;
 };
 
 type Circle = {
@@ -333,6 +356,132 @@ export default function MemberSlotGrid({
       }
     };
 
+  const confirmPayment =
+    async (
+      member:
+        Member
+    ) => {
+      if (
+        !active ||
+        !member.paymentClaimId
+      ) {
+        return;
+      }
+
+      const name =
+        typeof member.user ===
+        "object"
+          ? `${member.user.firstName} ${member.user.lastName}`
+          : "This member";
+
+      if (
+        !window.confirm(
+          `Confirm ${name}'s monthly contribution? This will mark the contribution as paid and include it in the current savings and party funds.`
+        )
+      ) {
+        return;
+      }
+
+      setErr("");
+      setMsg("");
+
+      try {
+        const data =
+          await api(
+            `/api/admin/payment-claims/${member.paymentClaimId}/confirm`,
+            {
+              method:
+                "POST",
+
+              headers: {
+                Authorization:
+                  `Bearer ${token}`
+              }
+            }
+          );
+
+        setMsg(
+          data.message
+        );
+
+        await load();
+      } catch (
+        e: any
+      ) {
+        setErr(
+          e.message
+        );
+      }
+    };
+
+  const rejectPayment =
+    async (
+      member:
+        Member
+    ) => {
+      if (
+        !active ||
+        !member.paymentClaimId
+      ) {
+        return;
+      }
+
+      const name =
+        typeof member.user ===
+        "object"
+          ? `${member.user.firstName} ${member.user.lastName}`
+          : "This member";
+
+      const reason =
+        window.prompt(
+          `Reason for rejecting ${name}'s payment report:`
+        )?.trim() ||
+        "";
+
+      if (!reason) {
+        return;
+      }
+
+      setErr("");
+      setMsg("");
+
+      try {
+        const data =
+          await api(
+            `/api/admin/payment-claims/${member.paymentClaimId}/reject`,
+            {
+              method:
+                "POST",
+
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+
+                "Content-Type":
+                  "application/json"
+              },
+
+              body:
+                JSON.stringify({
+                  reason
+                })
+            }
+          );
+
+        setMsg(
+          data.message
+        );
+
+        await load();
+      } catch (
+        e: any
+      ) {
+        setErr(
+          e.message
+        );
+      }
+    };
+
   const deleteCircle =
     async () => {
       if (!active)
@@ -614,6 +763,16 @@ export default function MemberSlotGrid({
                       ? "bg-red-100 text-red-700"
                       : "bg-blue-800 text-white";
 
+                  const memberName =
+                    typeof member.user ===
+                    "object"
+                      ? `${member.user.firstName} ${member.user.lastName}`
+                      : "Member";
+
+                  const paymentStatus =
+                    member.paymentStatus ||
+                    "unreported";
+
                   return (
                     <div
                       key={
@@ -629,7 +788,83 @@ export default function MemberSlotGrid({
                         position
                       }
 
+                      <span className="w-full truncate text-[10px] font-semibold opacity-90">
+                        {memberName}
+                      </span>
+
+                      <div className="mt-1">
+                        {paymentStatus ===
+                          "paid" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-green-600 text-white px-2 py-0.5 text-[9px] font-bold">
+                            <CheckCircle2
+                              size={10}
+                            />
+                            Paid
+                          </span>
+                        )}
+
+                        {paymentStatus ===
+                          "reported" && (
+                          <div className="flex flex-col gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-300 text-slate-900 px-2 py-0.5 text-[9px] font-bold">
+                              <Clock3
+                                size={10}
+                              />
+                              Reported
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                confirmPayment(
+                                  member
+                                )
+                              }
+                              className="rounded bg-green-600 text-white px-2 py-1 text-[9px] font-bold hover:bg-green-700"
+                            >
+                              Confirm
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                rejectPayment(
+                                  member
+                                )
+                              }
+                              className="rounded bg-red-600 text-white px-2 py-1 text-[9px] font-bold hover:bg-red-700"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+
+                        {paymentStatus ===
+                          "rejected" && (
+                          <span
+                            title={
+                              member.paymentRejectionReason ||
+                              "Payment report was rejected."
+                            }
+                            className="inline-flex items-center gap-1 rounded-full bg-red-600 text-white px-2 py-0.5 text-[9px] font-bold"
+                          >
+                            <XCircle
+                              size={10}
+                            />
+                            Rejected
+                          </span>
+                        )}
+
+                        {paymentStatus ===
+                          "unreported" && (
+                          <span className="text-[9px] font-semibold opacity-60">
+                            Not reported
+                          </span>
+                        )}
+                      </div>
+
                       <button
+                        type="button"
                         onClick={() =>
                           removeSlot(
                             position

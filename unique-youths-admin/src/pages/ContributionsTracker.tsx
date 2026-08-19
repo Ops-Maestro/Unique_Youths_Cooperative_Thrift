@@ -5,14 +5,50 @@ import { PageHeader, Banner, naira } from "../components/ui";
 
 type LateFee = { id: string; amount: number; status: "owed" | "paid" };
 
+type PaymentClaim = {
+  _id: string;
+  monthKey: string;
+  amount: number;
+  status:
+    | "reported"
+    | "confirmed"
+    | "rejected";
+  reportedAt: string;
+  rejectionReason?: string | null;
+  paymentReference?: string | null;
+  user: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+    email?: string;
+    primaryPhone?: string;
+    avatarDataUrl?: string;
+  };
+  circle:
+    | {
+        id: string;
+        name: string;
+        cycleNumber: number;
+        numericId: number;
+      }
+    | null;
+};
+
 type Member = {
   numericId: number;
   user: { _id: string; firstName: string; lastName: string; username: string; avatarDataUrl?: string } | string | null;
-  status: "onTime" | "unpaid";
+  status: "onTime" | "unpaid" | "reported" | "rejected";
   savingsAmount: number;
   partyAmount: number;
   paidAt: string | null;
   ledgerId: string | null;
+  paymentClaim: {
+    id: string;
+    status: "reported" | "confirmed" | "rejected";
+    reportedAt: string;
+    rejectionReason?: string | null;
+  } | null;
   lateFee: LateFee | null;
 };
 
@@ -31,21 +67,68 @@ type Circle = {
 
 const STATUS_STYLES: Record<Member["status"], string> = {
   onTime: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
+  reported: "bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800",
+  rejected: "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800",
   unpaid: "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
 };
 
-function StatusBadge({ m }: { m: Member }) {
-  if (m.status === "onTime") {
+function StatusBadge({
+  m
+}: {
+  m: Member
+}) {
+  if (
+    m.status ===
+    "onTime"
+  ) {
     return (
       <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400 font-semibold text-sm">
-        <CheckCircle2 size={15} /> Paid {naira(m.savingsAmount + m.partyAmount)}
+        <CheckCircle2
+          size={15}
+        />{" "}
+        Paid{" "}
+        {naira(
+          m.savingsAmount +
+            m.partyAmount
+        )}
+      </span>
+    );
+  }
+
+  if (
+    m.status ===
+    "reported"
+  ) {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold text-sm">
+        <Clock
+          size={15}
+        />{" "}
+        Payment reported — awaiting confirmation
+      </span>
+    );
+  }
+
+  if (
+    m.status ===
+    "rejected"
+  ) {
+    return (
+      <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-400 font-semibold text-sm">
+        <XCircle
+          size={15}
+        />{" "}
+        Payment report rejected
       </span>
     );
   }
 
   return (
     <span className="inline-flex items-center gap-1 text-slate-400 dark:text-slate-500 font-semibold text-sm">
-      <XCircle size={15} /> Not paid yet this month
+      <XCircle
+        size={15}
+      />{" "}
+      Not paid yet this month
     </span>
   );
 }
@@ -58,19 +141,166 @@ export default function ContributionsTracker({
   refreshKey?: number;
 }) {
   const [circles, setCircles] = useState<Circle[]>([]);
+  const [claims, setClaims] = useState<PaymentClaim[]>([]);
+  const [month, setMonth] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [busyId, setBusyId] = useState("");
 
-  const load = () => {
-    api("/api/admin/contributions", {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(setCircles)
-      .catch(e => setErr(e.message));
+  const load = async () => {
+    setErr("");
+
+    try {
+      const [contributionData, claimData] =
+        await Promise.all([
+          api("/api/admin/contributions", {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }),
+
+          api("/api/admin/payment-claims/current", {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          })
+        ]);
+
+      setCircles(
+        contributionData
+      );
+
+      setClaims(
+        claimData.claims ||
+          []
+      );
+
+      setMonth(
+        claimData.month ||
+          ""
+      );
+    } catch (e: any) {
+      setErr(
+        e.message
+      );
+    }
   };
 
-  useEffect(load, [token, refreshKey]);
+  useEffect(() => {
+    load();
+  }, [token, refreshKey]);
+
+  const confirmPaymentReport = async (
+    claimId: string
+  ) => {
+    setErr("");
+    setMsg("");
+    setBusyId(
+      claimId
+    );
+
+    try {
+      await api(
+        `/api/admin/payment-claims/${claimId}/confirm`,
+        {
+          method:
+            "POST",
+          headers: {
+            Authorization:
+              `Bearer ${token}`
+          }
+        }
+      );
+
+      setMsg(
+        "Payment report confirmed."
+      );
+
+      await load();
+    } catch (e: any) {
+      setErr(
+        e.message
+      );
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const rejectPaymentReport = async (
+    claimId: string
+  ) => {
+    const reason =
+      window.prompt(
+        "Reason for rejecting this payment report:",
+        "Payment proof could not be verified."
+      );
+
+    if (
+      reason ===
+      null
+    ) {
+      return;
+    }
+
+    setErr("");
+    setMsg("");
+    setBusyId(
+      claimId
+    );
+
+    try {
+      await api(
+        `/api/admin/payment-claims/${claimId}/reject`,
+        {
+          method:
+            "POST",
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+            "Content-Type":
+              "application/json"
+          },
+          body:
+            JSON.stringify({
+              reason
+            })
+        }
+      );
+
+      setMsg(
+        "Payment report rejected."
+      );
+
+      await load();
+    } catch (e: any) {
+      setErr(
+        e.message
+      );
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  // NEW: Delete (remove) a reported claim entirely
+  const deleteReportedClaim = async (claimId: string) => {
+    if (!window.confirm("Delete this reported payment claim? This will remove it from the system and allow the member to report again.")) return;
+    setErr("");
+    setMsg("");
+    setBusyId(claimId);
+
+    try {
+      await api(`/api/admin/payment-claims/${claimId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMsg("Claim deleted.");
+      await load();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusyId("");
+    }
+  };
 
   const markPaid = async (userId: string) => {
     setErr("");
@@ -220,6 +450,114 @@ export default function ContributionsTracker({
       {err && <Banner tone="error" message={err} />}
       {msg && <Banner tone="success" message={msg} />}
 
+      {claims.filter(
+        claim =>
+          claim.status ===
+          "reported"
+      ).length > 0 && (
+        <section className="mt-5 mb-6 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-5">
+          <h2 className="font-bold text-xl text-amber-900 dark:text-amber-300">
+            Payment reports awaiting confirmation
+          </h2>
+
+          <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
+            Members have reported that their{" "}
+            {month ||
+              "current month"} contribution was paid.
+            Verify the proof sent through WhatsApp before
+            confirming the payment.
+          </p>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+            {claims
+              .filter(
+                claim =>
+                  claim.status ===
+                  "reported"
+              )
+              .map(
+                claim => (
+                  <div
+                    key={
+                      claim._id
+                    }
+                    className="bg-white dark:bg-slate-900 border border-amber-200 dark:border-slate-700 rounded-xl p-4 relative"
+                  >
+                    {/* Delete button (X) */}
+                    <button
+                      onClick={() => deleteReportedClaim(claim._id)}
+                      disabled={busyId === claim._id}
+                      className="absolute top-3 right-3 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition disabled:opacity-30"
+                      title="Delete this report"
+                    >
+                      ✕
+                    </button>
+
+                    <p className="font-bold text-slate-900 dark:text-slate-100 pr-6">
+                      {claim.user.firstName}{" "}
+                      {claim.user.lastName}
+                    </p>
+
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      @{claim.user.username}
+                      {claim.circle
+                        ? ` · Slot ${claim.circle.numericId}`
+                        : " · Awaiting circle assignment"}
+                    </p>
+
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 mt-3">
+                      ₦
+                      {Number(
+                        claim.amount
+                      ).toLocaleString()}{" "}
+                      monthly contribution reported
+                    </p>
+
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Reported{" "}
+                      {new Date(
+                        claim.reportedAt
+                      ).toLocaleString()}
+                    </p>
+
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={() =>
+                          confirmPaymentReport(
+                            claim._id
+                          )
+                        }
+                        disabled={
+                          busyId ===
+                          claim._id
+                        }
+                        className="flex-1 bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+                      >
+                        Confirm
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          rejectPaymentReport(
+                            claim._id
+                          )
+                        }
+                        disabled={
+                          busyId ===
+                          claim._id
+                        }
+                        className="flex-1 bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+          </div>
+        </section>
+      )}
+
       <div className="space-y-8">
         {circles.map(c => (
           <div
@@ -258,13 +596,37 @@ export default function ContributionsTracker({
                 const u =
                   typeof m.user === "object" && m.user ? m.user : null;
 
-                const uid = u?._id;
+                const uid =
+                  u?._id;
+
+                const claim =
+                  claims.find(
+                    item =>
+                      item.user?._id ===
+                      uid &&
+                      item.monthKey ===
+                        new Date().toISOString().slice(0, 7)
+                  );
+
+                const effectiveStatus =
+                  m.status ===
+                    "onTime"
+                    ? "onTime"
+                    : claim?.status ===
+                        "reported"
+                    ? "reported"
+                    : claim?.status ===
+                        "rejected"
+                    ? "rejected"
+                    : m.status;
 
                 return (
                   <div
                     key={m.numericId}
                     className={`border rounded-xl p-3 flex items-center gap-3 ${
-                      STATUS_STYLES[m.status]
+                      STATUS_STYLES[
+                        effectiveStatus
+                      ]
                     }`}
                   >
                     {u?.avatarDataUrl ? (
@@ -285,9 +647,75 @@ export default function ContributionsTracker({
                         {u ? `${u.firstName} ${u.lastName}` : "Empty slot"}
                       </p>
 
-                      <StatusBadge m={m} />
+                      <StatusBadge
+                        m={{
+                          ...m,
+                          status:
+                            effectiveStatus,
+                          paymentClaim:
+                            claim
+                              ? {
+                                  id:
+                                    claim._id,
+                                  status:
+                                    claim.status,
+                                  reportedAt:
+                                    claim.reportedAt,
+                                  rejectionReason:
+                                    claim.rejectionReason
+                                }
+                              : m.paymentClaim
+                        }}
+                      />
 
-                      {uid && m.status === "unpaid" && (
+                      {effectiveStatus ===
+                        "reported" &&
+                        claim && (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() =>
+                              confirmPaymentReport(
+                                claim._id
+                              )
+                            }
+                            disabled={
+                              busyId ===
+                              claim._id
+                            }
+                            className="text-xs font-semibold bg-green-600 text-white px-2.5 py-1.5 rounded-md disabled:opacity-50"
+                          >
+                            Confirm
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              rejectPaymentReport(
+                                claim._id
+                              )
+                            }
+                            disabled={
+                              busyId ===
+                              claim._id
+                            }
+                            className="text-xs font-semibold bg-red-600 text-white px-2.5 py-1.5 rounded-md disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+
+                      {effectiveStatus ===
+                        "rejected" &&
+                        claim?.rejectionReason && (
+                        <p className="text-xs text-red-700 dark:text-red-300 mt-2">
+                          {claim.rejectionReason}
+                        </p>
+                      )}
+
+
+                      {uid &&
+                        effectiveStatus ===
+                          "unpaid" && (
                         <div className="flex gap-2 mt-2">
                           <button
                             onClick={() => markPaid(uid)}

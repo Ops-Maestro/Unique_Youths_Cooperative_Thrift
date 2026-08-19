@@ -69,9 +69,20 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Install dependencies
+        working-directory: ./unique-youths-client
+        run: npm ci
+
+      - name: Install dependencies
+        working-directory: ./unique-youths-client
         run: npm install
 
+      - name: Install Capacitor
+        run: |
+          npm install @capacitor/core @capacitor/android @capacitor/app
+          npm install --save-dev @capacitor/cli
+
       - name: Build web app
+        working-directory: ./unique-youths-client
         run: npm run build
         env:
           VITE_API_BASE_URL: ${{ vars.BACKEND_API_URL }}

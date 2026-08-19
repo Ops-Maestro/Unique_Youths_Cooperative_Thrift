@@ -1,6 +1,7 @@
 import express from "express";
 import User from "../models/User.js";
 import Ledger from "../models/Ledger.js";
+import PaymentClaim from "../models/PaymentClaim.js";
 import LateFee from "../models/LateFee.js";
 import Circle from "../models/Circle.js";
 import Payout from "../models/Payout.js";
@@ -39,6 +40,11 @@ import {
   toCsv
 } from "../utils/csv.js";
 
+// ============================================================
+// IMPORT SETTINGS MODEL (shared)
+// ============================================================
+import { Settings } from "../models/Settings.js";
+
 const router = express.Router();
 
 /*
@@ -67,6 +73,49 @@ const BROADCAST_AUTO_EXPIRY_MS =
 /*
  * Return the beginning of the current calendar month.
  */
+function currentMonthKey() {
+  const start =
+    startOfCurrentMonth();
+
+  return `${start.getFullYear()}-${String(
+    start.getMonth() + 1
+  ).padStart(
+    2,
+    "0"
+  )}`;
+}
+
+async function nextLedgerMonthIndexFor(
+  userId,
+  circleId
+) {
+  const rows =
+    await Ledger.find({
+      user:
+        userId,
+
+      circle:
+        circleId
+    }).select(
+      "monthIndex"
+    );
+
+  return rows.reduce(
+    (
+      highest,
+      row
+    ) =>
+      Math.max(
+        highest,
+        Number(
+          row.monthIndex ||
+            0
+        )
+      ),
+    0
+  ) + 1;
+}
+
 function startOfCurrentMonth() {
   const start = new Date();
 
@@ -80,6 +129,18 @@ function startOfCurrentMonth() {
   );
 
   return start;
+}
+
+function currentMonthLabel() {
+  return new Intl.DateTimeFormat(
+    "en-NG",
+    {
+      month: "long",
+      year: "numeric"
+    }
+  ).format(
+    new Date()
+  );
 }
 
 /*
@@ -219,102 +280,110 @@ async function getCurrentMonthPaidMembers(
 async function getCurrentMonthPayoutSummary(
   circle
 ) {
-  const paidLedgers =
-    await getCurrentMonthPaidMembers(
-      circle._id
-    );
+  try {
+    const paidLedgers =
+      await getCurrentMonthPaidMembers(
+        circle._id
+      );
 
-  const recipientCount =
-    validateRecipientCount(
-      circle.recipientCount ||
-        DEFAULT_RECIPIENTS_PER_MONTH
-    );
+    const recipientCount =
+      validateRecipientCount(
+        circle.recipientCount ||
+          DEFAULT_RECIPIENTS_PER_MONTH
+      );
 
-  const summary =
-    calculatePayoutSummary({
-      circleSize:
-        circle.members.length,
+    // If not enough paid members, return null instead of throwing
+    if (paidLedgers.length < recipientCount) {
+      return null;
+    }
+
+    const summary =
+      calculatePayoutSummary({
+        circleSize:
+          circle.members.length,
+
+        paidMemberCount:
+          paidLedgers.length,
+
+        recipientCount
+      });
+
+    const actualSavingsPot =
+      paidLedgers.reduce(
+        (
+          total,
+          ledger
+        ) =>
+          total +
+          Number(
+            ledger.savingsAmount ||
+              0
+          ),
+        0
+      );
+
+    const actualPartyFund =
+      paidLedgers.reduce(
+        (
+          total,
+          ledger
+        ) =>
+          total +
+          Number(
+            ledger.partyAmount ||
+              0
+          ),
+        0
+      );
+
+    const grossPayoutPerRecipient =
+      actualSavingsPot /
+      recipientCount;
+
+    const maintenanceFeePerRecipient =
+      summary.maintenanceFeePerRecipient;
+
+    const netPayoutPerRecipient =
+      grossPayoutPerRecipient -
+      maintenanceFeePerRecipient;
+
+    if (
+      netPayoutPerRecipient <
+      0
+    ) {
+      return null;
+    }
+
+    return {
+      ...summary,
 
       paidMemberCount:
         paidLedgers.length,
 
-      recipientCount
-    });
+      savingsPot:
+        actualSavingsPot,
 
-  const actualSavingsPot =
-    paidLedgers.reduce(
-      (
-        total,
-        ledger
-      ) =>
-        total +
-        Number(
-          ledger.savingsAmount ||
-            0
-        ),
-      0
-    );
+      partyFund:
+        actualPartyFund,
 
-  const actualPartyFund =
-    paidLedgers.reduce(
-      (
-        total,
-        ledger
-      ) =>
-        total +
-        Number(
-          ledger.partyAmount ||
-            0
-        ),
-      0
-    );
+      grossPayoutPerRecipient,
 
-  const grossPayoutPerRecipient =
-    actualSavingsPot /
-    recipientCount;
+      maintenanceFeePerRecipient,
 
-  const maintenanceFeePerRecipient =
-    summary.maintenanceFeePerRecipient;
+      totalMaintenanceFees:
+        maintenanceFeePerRecipient *
+        recipientCount,
 
-  const netPayoutPerRecipient =
-    grossPayoutPerRecipient -
-    maintenanceFeePerRecipient;
+      netPayoutPerRecipient,
 
-  if (
-    netPayoutPerRecipient <
-    0
-  ) {
-    throw new Error(
-      "The calculated maintenance fee is greater than the gross payout."
-    );
+      totalNetPayout:
+        netPayoutPerRecipient *
+        recipientCount
+    };
+  } catch (error) {
+    console.warn("Error calculating payout summary:", error.message);
+    return null;
   }
-
-  return {
-    ...summary,
-
-    paidMemberCount:
-      paidLedgers.length,
-
-    savingsPot:
-      actualSavingsPot,
-
-    partyFund:
-      actualPartyFund,
-
-    grossPayoutPerRecipient,
-
-    maintenanceFeePerRecipient,
-
-    totalMaintenanceFees:
-      maintenanceFeePerRecipient *
-      recipientCount,
-
-    netPayoutPerRecipient,
-
-    totalNetPayout:
-      netPayoutPerRecipient *
-      recipientCount
-  };
 }
 
 /*
@@ -721,6 +790,569 @@ router.post(
 );
 
 /* ============================================================
+ * PAYMENT CLAIMS
+ *
+ * Member reports are pending financial records until an admin
+ * explicitly confirms them.
+ * ============================================================ */
+/* ============================================================
+ * PAYMENT CLAIMS - Current Month
+ * ============================================================ */
+router.get(
+  "/payment-claims/current",
+  requireAdmin,
+  async (
+    _req,
+    res
+  ) => {
+    const monthKey =
+      currentMonthKey();
+
+    const claims =
+      await PaymentClaim.find({
+        monthKey
+      })
+        .populate(
+          "user",
+          "firstName lastName username email primaryPhone avatarDataUrl registrationStatus"
+        )
+        .populate(
+          "confirmedBy",
+          "username email"
+        )
+        .populate(
+          "rejectedBy",
+          "username email"
+        )
+        .sort({
+          updatedAt:
+            -1
+        });
+
+    const circles =
+      await Circle.find()
+        .populate(
+          "members.user",
+          "firstName lastName username"
+        );
+
+    const circleByUser =
+      new Map();
+
+    for (
+      const circle of circles
+    ) {
+      for (
+        const member of circle.members
+      ) {
+        circleByUser.set(
+          String(
+            member.user?._id ||
+              member.user
+          ),
+          {
+            id:
+              circle._id,
+
+            name:
+              circle.name,
+
+            cycleNumber:
+              circle.cycleNumber,
+
+            numericId:
+              member.numericId
+          }
+        );
+      }
+    }
+
+    res.json({
+      month:
+        currentMonthLabel(),
+
+      monthKey,
+
+      claims:
+        claims.map(
+          claim => ({
+            ...claim.toObject(),
+
+            circle:
+              circleByUser.get(
+                String(
+                  claim.user._id
+                )
+              ) ||
+              null
+          })
+        )
+    });
+  }
+);
+
+/* ============================================================
+ * ALL PAYMENT CLAIMS (NEW: FIXES THE ADMIN PANEL 404 ERROR)
+ * ============================================================ */
+router.get(
+  "/payment-claims",
+  requireAdmin,
+  async (
+    _req,
+    res
+  ) => {
+    try {
+      const claims =
+        await PaymentClaim.find()
+          .populate(
+            "user",
+            "firstName lastName username email primaryPhone avatarDataUrl registrationStatus"
+          )
+          .populate(
+            "confirmedBy",
+            "username email"
+          )
+          .populate(
+            "rejectedBy",
+            "username email"
+          )
+          .sort({
+            updatedAt:
+              -1
+          })
+          .lean();
+
+      // NEW: Find associated ledgers to provide the ledgerId for reversal
+      const startOfMonth = startOfCurrentMonth();
+      const userIds = claims.map(c => c.user._id || c.user);
+      const ledgers = await Ledger.find({
+        user: { $in: userIds },
+        isPaid: true,
+        paidAt: { $gte: startOfMonth }
+      }).select("user _id").lean();
+
+      const ledgerMap = new Map();
+      for (const l of ledgers) {
+        ledgerMap.set(String(l.user), l._id);
+      }
+
+      const claimsWithLedger = claims.map(c => ({
+        ...c,
+        ledgerId: ledgerMap.get(String(c.user._id || c.user)) || null
+      }));
+
+      const circles =
+        await Circle.find()
+          .populate(
+            "members.user",
+            "firstName lastName username"
+          );
+
+      const circleByUser =
+        new Map();
+
+      for (
+        const circle of circles
+      ) {
+        for (
+          const member of circle.members
+        ) {
+          circleByUser.set(
+            String(
+              member.user?._id ||
+                member.user
+            ),
+            {
+              id:
+                circle._id,
+
+              name:
+                circle.name,
+
+              cycleNumber:
+                circle.cycleNumber,
+
+              numericId:
+                member.numericId
+            }
+          );
+        }
+      }
+
+      res.json(
+        claimsWithLedger.map(
+          claim => ({
+            ...claim,
+
+            circle:
+              circleByUser.get(
+                String(
+                  claim.user._id
+                )
+              ) ||
+              null
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error fetching all admin payment claims:", error);
+      res.status(500).json({ message: "Failed to retrieve payment claims from server." });
+    }
+  }
+);
+
+router.post(
+  "/payment-claims/:claimId/confirm",
+  requireAdmin,
+  async (
+    req,
+    res
+  ) => {
+    const claim =
+      await PaymentClaim.findById(
+        req.params.claimId
+      );
+
+    if (!claim) {
+      return res
+        .status(404)
+        .json({
+          message:
+            "Payment report not found."
+        });
+    }
+
+    if (
+      claim.status ===
+      "confirmed"
+    ) {
+      return res
+        .status(409)
+        .json({
+          message:
+            "This payment report is already confirmed."
+        });
+    }
+
+    const user =
+      await User.findById(
+        claim.user
+      );
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({
+          message:
+            "Member not found."
+        });
+    }
+
+    const circle =
+      await Circle.findOne({
+        "members.user":
+          user._id
+      });
+
+    const now =
+      new Date();
+
+    claim.status =
+      "confirmed";
+
+    claim.confirmedAt =
+      now;
+
+    claim.confirmedBy =
+      req.auth.adminId;
+
+    claim.rejectedAt =
+      undefined;
+
+    claim.rejectedBy =
+      undefined;
+
+    claim.rejectionReason =
+      undefined;
+
+    claim.paymentReference =
+      (
+        typeof req.body
+          ?.paymentReference ===
+        "string"
+          ? req.body.paymentReference.trim()
+          : ""
+      ) ||
+      claim.paymentReference ||
+      `CLAIM-${Date.now()}`;
+
+    await claim.save();
+
+    let ledger =
+      null;
+
+    /*
+     * Only a member assigned to a circle can contribute to the actual
+     * circle savings pot. An unassigned member's confirmed claim is kept
+     * safely until their slot is assigned.
+     */
+    if (circle) {
+      const existing =
+        await Ledger.findOne({
+          user:
+            user._id,
+
+          circle:
+            circle._id,
+
+          isPaid:
+            true,
+
+          paidAt: {
+            $gte:
+              startOfCurrentMonth()
+          }
+        }).sort({
+          paidAt:
+            -1
+        });
+
+      if (existing) {
+        ledger =
+          existing;
+      } else {
+        const monthIndex =
+          await nextLedgerMonthIndexFor(
+            user._id,
+            circle._id
+          );
+
+        ledger =
+          await Ledger.create({
+            user:
+              user._id,
+
+            circle:
+              circle._id,
+
+            monthIndex,
+
+            savingsAmount:
+              SAVINGS_AMOUNT,
+
+            partyAmount:
+              PARTY_AMOUNT,
+
+            latePenalty:
+              0,
+
+            isPaid:
+              true,
+
+            paymentClaimStatus:
+              "confirmed",   // <-- ADDED: ensures consistency with claim
+
+            confirmedBy:
+              req.auth.adminId,
+
+            paymentReference:
+              claim.paymentReference,
+
+            paidAt:
+              now
+          });
+      }
+    }
+
+    await Announcement.create({
+      type:
+        "payment_received",
+
+      description:
+        `${user.firstName}'s ${currentMonthLabel()} contribution payment was confirmed by an administrator.`,
+
+      circle:
+        circle?._id ||
+        null,
+
+      user:
+        user._id
+    });
+
+    await AdminActivity.create({
+      admin:
+        req.auth.adminId,
+
+      action:
+        "payment_claim_confirmed",
+
+      detail:
+        `${user.firstName} ${user.lastName}'s ${currentMonthLabel()} payment report was confirmed.${
+          circle
+            ? ""
+            : " The member is not yet assigned to a circle; the ledger will be created when the slot is assigned."
+        }`
+    });
+
+    res.json({
+      message:
+        circle
+          ? `${user.firstName}'s ${currentMonthLabel()} payment has been confirmed.`
+          : `${user.firstName}'s ${currentMonthLabel()} payment report has been confirmed. It will enter the circle ledger when the member is assigned a slot.`,
+
+      claim,
+
+      ledger
+    });
+  }
+);
+
+router.post(
+  "/payment-claims/:claimId/reject",
+  requireAdmin,
+  async (
+    req,
+    res
+  ) => {
+    const claim =
+      await PaymentClaim.findById(
+        req.params.claimId
+      );
+
+    if (!claim) {
+      return res
+        .status(404)
+        .json({
+          message:
+            "Payment report not found."
+        });
+    }
+
+    if (
+      claim.status ===
+      "confirmed"
+    ) {
+      return res
+        .status(409)
+        .json({
+          message:
+            "A confirmed payment report cannot be rejected."
+        });
+    }
+
+    const reason =
+      typeof req.body
+        ?.reason ===
+      "string"
+        ? req.body.reason.trim()
+        : "";
+
+    claim.status =
+      "rejected";
+
+    claim.rejectedAt =
+      new Date();
+
+    claim.rejectedBy =
+      req.auth.adminId;
+
+    claim.rejectionReason =
+      reason ||
+      "The payment proof could not be verified. Please check your proof and report the payment again.";
+
+    await claim.save();
+
+    const user =
+      await User.findById(
+        claim.user
+      );
+
+    if (user) {
+      await Announcement.create({
+        type:
+          "general_update",
+
+        description:
+          `${user.firstName}'s ${currentMonthLabel()} payment report needs attention. Check the administrator's feedback and report the payment again.`,
+
+        user:
+          user._id
+      });
+    }
+
+    await AdminActivity.create({
+      admin:
+        req.auth.adminId,
+
+      action:
+        "payment_claim_rejected",
+
+      detail:
+        `${user ? `${user.firstName} ${user.lastName}` : "A member"}'s ${currentMonthLabel()} payment report was rejected. Reason: ${claim.rejectionReason}`
+    });
+
+    res.json({
+      message:
+        "Payment report rejected.",
+
+      claim
+    });
+  }
+);
+
+// ============================================================
+// REVERT A REJECTED PAYMENT CLAIM (Reopen it for the member)
+// ============================================================
+router.post("/payment-claims/:claimId/revert", requireAdmin, async (req, res) => {
+  const claim = await PaymentClaim.findById(req.params.claimId);
+  if (!claim) {
+    return res.status(404).json({ message: "Payment claim not found." });
+  }
+  // Only allow reverting rejected claims
+  if (claim.status !== "rejected") {
+    return res.status(400).json({ message: "Only rejected claims can be reverted." });
+  }
+
+  claim.status = "reported";
+  claim.rejectedAt = undefined;
+  claim.rejectedBy = undefined;
+  claim.rejectionReason = undefined;
+  claim.confirmedAt = undefined;
+  claim.confirmedBy = undefined;
+  await claim.save();
+
+  await AdminActivity.create({
+    admin: req.auth.adminId,
+    action: "payment_claim_reopened",
+    detail: `Payment claim for ${claim.user} was reopened (previously rejected).`
+  });
+
+  res.json({ message: "Claim reopened. The member can now report the payment again." });
+});
+
+/* ============================================================
+ * NEW: DELETE A REPORTED PAYMENT CLAIM (Remove the "X" button action)
+ * ============================================================ */
+router.delete("/payment-claims/:claimId", requireAdmin, async (req, res) => {
+  const claim = await PaymentClaim.findById(req.params.claimId);
+  if (!claim) return res.status(404).json({ message: "Payment claim not found." });
+  
+  // Note: We do not restrict deletion based on status. 
+  // If an admin wants to wipe a "reported" claim, we let them.
+
+  await PaymentClaim.findByIdAndDelete(req.params.claimId);
+
+  await AdminActivity.create({
+    admin: req.auth.adminId,
+    action: "payment_claim_deleted",
+    detail: `A reported payment claim for ${claim.user} was deleted by the admin.`
+  });
+
+  res.json({ message: "Claim deleted. The member now has no active report." });
+});
+
+
+/* ============================================================
  * PAYMENTS
  * ============================================================ */
 router.post(
@@ -773,62 +1405,184 @@ router.post(
         });
     }
 
-    const paidAt =
-      new Date();
+    const startOfMonth =
+      startOfCurrentMonth();
 
-    const monthIndex =
-      (await Ledger.countDocuments(
-        {
-          user:
-            userId,
-
-          circle:
-            circle._id
-        }
-      )) + 1;
-
-    const ledger =
-      await Ledger.create({
+    let ledger =
+      await Ledger.findOne({
         user:
           userId,
 
         circle:
           circle._id,
 
-        monthIndex,
+        $or: [
+          {
+            createdAt: {
+              $gte:
+                startOfMonth
+            }
+          },
 
-        savingsAmount:
-          SAVINGS_AMOUNT,
+          {
+            paymentClaimedAt: {
+              $gte:
+                startOfMonth
+            }
+          },
 
-        partyAmount:
-          PARTY_AMOUNT,
-
-        latePenalty:
-          0,
-
-        isPaid:
-          true,
-
-        confirmedBy:
-          req.auth.adminId,
-
-        paymentReference:
-          req.body
-            .paymentReference ||
-          `PAY-${Date.now()}`,
-
-        paidAt
+          {
+            paidAt: {
+              $gte:
+                startOfMonth
+            }
+          }
+        ]
+      }).sort({
+        createdAt:
+          -1
       });
+
+    if (
+      ledger?.isPaid
+    ) {
+      return res
+        .status(409)
+        .json({
+          message:
+            `This member's ${currentMonthLabel()} contribution has already been confirmed.`,
+          ledger
+        });
+    }
+
+    const previousLedgers =
+      await Ledger.find({
+        user:
+          userId,
+
+        circle:
+          circle._id
+      }).select(
+        "monthIndex"
+      );
+
+    const nextMonthIndex =
+      previousLedgers.reduce(
+        (
+          highest,
+          item
+        ) =>
+          Math.max(
+            highest,
+            Number(
+              item.monthIndex ||
+                0
+            )
+          ),
+        0
+      ) + 1;
+
+    const paidAt =
+      new Date();
+
+    if (!ledger) {
+      ledger =
+        await Ledger.create({
+          user:
+            userId,
+
+          circle:
+            circle._id,
+
+          monthIndex:
+            nextMonthIndex,
+
+          savingsAmount:
+            SAVINGS_AMOUNT,
+
+          partyAmount:
+            PARTY_AMOUNT,
+
+          latePenalty:
+            0,
+
+          isPaid:
+            true,
+
+          paymentClaimStatus:
+            "confirmed", // <-- ADDED: ensures consistency
+
+          confirmedBy:
+            req.auth.adminId,
+
+          paymentReference:
+            req.body
+              .paymentReference ||
+            `PAY-${Date.now()}`,
+
+          paidAt
+        });
+    } else {
+      ledger.savingsAmount =
+        SAVINGS_AMOUNT;
+
+      ledger.partyAmount =
+        PARTY_AMOUNT;
+
+      ledger.isPaid =
+        true;
+
+      ledger.paymentClaimStatus =
+        "confirmed";
+
+      ledger.paymentClaimedAt =
+        ledger.paymentClaimedAt ||
+        paidAt;
+
+      ledger.paymentRejectedAt =
+        undefined;
+
+      ledger.paymentRejectionReason =
+        undefined;
+
+      ledger.confirmedBy =
+        req.auth.adminId;
+
+      ledger.paymentReference =
+        req.body
+          .paymentReference ||
+        ledger.paymentReference ||
+        `PAY-${Date.now()}`;
+
+      ledger.paidAt =
+        paidAt;
+
+      await ledger.save();
+    }
 
     await Announcement.create({
       type:
         "payment_received",
 
       description:
-        `${user.firstName}'s monthly contribution was confirmed.`,
+        `${user.firstName}'s ${currentMonthLabel()} monthly contribution was confirmed.`,
 
       circle:
-        circle._id
+        circle._id,
+
+      user:
+        user._id
+    });
+
+    await AdminActivity.create({
+      admin:
+        req.auth.adminId,
+
+      action:
+        "payment_confirmed",
+
+      detail:
+        `${user.firstName} ${user.lastName}'s ${currentMonthLabel()} monthly contribution was confirmed as paid.`
     });
 
     res
@@ -843,7 +1597,7 @@ router.post(
 );
 
 /* ============================================================
- * UNDO / REVERSE MONTHLY PAYMENT
+ * UNDO / REVERSE MONTHLY PAYMENT (UPDATED: NOW ALSO REVERTS THE CLAIM)
  * ============================================================ */
 router.delete(
   "/payments/:id",
@@ -886,9 +1640,23 @@ router.delete(
         ? `${user.firstName} ${user.lastName}`.trim()
         : "A member";
 
+    // 1. Delete the Ledger
     await Ledger.findByIdAndDelete(
       item._id
     );
+
+    // 2. Revert the related PaymentClaim back to "reported" so the member can report again
+    const relatedClaim = await PaymentClaim.findOne({
+      user: item.user,
+      monthKey: currentMonthKey(),
+      status: "confirmed"
+    });
+    if (relatedClaim) {
+      relatedClaim.status = "reported";
+      relatedClaim.confirmedBy = undefined;
+      relatedClaim.confirmedAt = undefined;
+      await relatedClaim.save();
+    }
 
     await Announcement.create({
       type:
@@ -909,12 +1677,13 @@ router.delete(
         "payment_reversed",
 
       detail:
-        `${memberName}'s ₦${paymentAmount.toLocaleString()} monthly contribution payment was reversed and its ledger record deleted.`
+        `${memberName}'s ₦${paymentAmount.toLocaleString()} monthly contribution payment was reversed and its ledger record deleted. The payment claim has been reopened.`
     });
 
     res.json({
       message:
-        "Payment reversed. The original payment notice has been preserved in the audit history."
+        "Payment reversed. The member can now report the payment again.",
+      claimReset: !!relatedClaim
     });
   }
 );
@@ -1255,18 +2024,34 @@ router.get(
 
     const startOfMonth =
       startOfCurrentMonth();
+    const monthKey = currentMonthKey();
 
     const ledgers =
       await Ledger.find({
-        paidAt: {
-          $gte:
-            startOfMonth
-        },
+        $or: [
+          {
+            paidAt: {
+              $gte:
+                startOfMonth
+            }
+          },
 
-        isPaid:
-          true
+          {
+            paymentClaimedAt: {
+              $gte:
+                startOfMonth
+            }
+          },
+
+          {
+            createdAt: {
+              $gte:
+                startOfMonth
+            }
+          }
+        ]
       }).sort({
-      paidAt:
+      createdAt:
         -1
     });
 
@@ -1279,6 +2064,11 @@ router.get(
       }).sort({
         createdAt:
           -1
+      });
+
+    const paymentClaims =
+      await PaymentClaim.find({
+        monthKey
       });
 
     const latestFeeByUser =
@@ -1327,6 +2117,20 @@ router.get(
       }
     }
 
+    const claimsByUser =
+      {};
+
+    for (
+      const claim of paymentClaims
+    ) {
+      claimsByUser[
+        String(
+          claim.user
+        )
+      ] =
+        claim;
+    }
+
     const data =
       circles.map(
         c => {
@@ -1349,10 +2153,23 @@ router.get(
                     uid
                   ];
 
+                const claim =
+                  claimsByUser[
+                    uid
+                  ];
+
                 const status =
                   !l
-                    ? "unpaid"
-                    : "onTime";
+                    ? (claim?.status === "reported" ? "reported" : "unpaid")
+                    : l.isPaid
+                    ? "onTime"
+                    : claim?.status === "reported" ||
+                      l.paymentClaimStatus === "reported"
+                    ? "reported"
+                    : l.paymentClaimStatus === "rejected" ||
+                      claim?.status === "rejected"
+                    ? "rejected"
+                    : "unpaid";
 
                 return {
                   numericId:
@@ -1378,6 +2195,48 @@ router.get(
                   ledgerId:
                     l?._id ||
                     null,
+
+                  paymentClaim:
+                    claim
+                      ? {
+                          id:
+                            claim._id,
+
+                          status:
+                            claim.status,
+
+                          reportedAt:
+                            claim.createdAt ||
+                            null,
+
+                          rejectionReason:
+                            claim.rejectionReason ||
+                            null
+                        }
+                      : (l &&
+                        !l.isPaid &&
+                        l.paymentClaimStatus !==
+                          "unreported"
+                          ? {
+                              id:
+                                l._id,
+
+                              status:
+                                l.paymentClaimStatus,
+
+                              claimedAt:
+                                l.paymentClaimedAt ||
+                                null,
+
+                              rejectedAt:
+                                l.paymentRejectedAt ||
+                                null,
+
+                              rejectionReason:
+                                l.paymentRejectionReason ||
+                                null
+                            }
+                          : null),
 
                   lateFee:
                     fee
@@ -1415,8 +2274,15 @@ router.get(
           const paidCount =
             members.filter(
               m =>
-                m.status !==
-                "unpaid"
+                m.status ===
+                "onTime"
+            ).length;
+
+          const reportedCount =
+            members.filter(
+              m =>
+                m.status ===
+                "reported"
             ).length;
 
           return {
@@ -1441,6 +2307,8 @@ router.get(
             collected,
 
             paidCount,
+
+            reportedCount,
 
             memberCount:
               c.members.length,
@@ -1725,155 +2593,169 @@ router.get(
     _req,
     res
   ) => {
-    const activeUsers =
-      await User.countDocuments({
-        registrationStatus:
-          "active"
-      });
+    try {
+      const activeUsers =
+        await User.countDocuments({
+          registrationStatus:
+            "active"
+        });
 
-    const [
-      totals,
-      circles,
-      circle,
-      lateFeeTotals
-    ] =
-      await Promise.all([
-        Ledger.aggregate([
-          {
-            $match: {
-              isPaid:
-                true
-            }
-          },
+      const [
+        totals,
+        circles,
+        circle,
+        lateFeeTotals
+      ] =
+        await Promise.all([
+          Ledger.aggregate([
+            {
+              $match: {
+                isPaid:
+                  true
+              }
+            },
 
-          {
-            $group: {
-              _id:
-                null,
+            {
+              $group: {
+                _id:
+                  null,
 
-              savingsTotal: {
-                $sum:
-                  "$savingsAmount"
-              },
+                savingsTotal: {
+                  $sum:
+                    "$savingsAmount"
+                },
 
-              partyTotal: {
-                $sum:
-                  "$partyAmount"
-              },
+                partyTotal: {
+                  $sum:
+                    "$partyAmount"
+                },
 
-              penaltyTotal: {
-                $sum:
-                  "$latePenalty"
+                penaltyTotal: {
+                  $sum:
+                    "$latePenalty"
+                }
               }
             }
-          }
-        ]),
+          ]),
 
-        Circle.find(),
+          Circle.find(),
 
-        Circle.findOne({
-          active:
-            true
-        }).sort({
-          cycleNumber:
-            -1
-        }),
+          Circle.findOne({
+            active:
+              true
+          }).sort({
+            cycleNumber:
+              -1
+          }),
 
-        LateFee.aggregate([
-          {
-            $match: {
-              status:
-                "paid"
-            }
-          },
+          LateFee.aggregate([
+            {
+              $match: {
+                status:
+                  "paid"
+              }
+            },
 
-          {
-            $group: {
-              _id:
-                null,
+            {
+              $group: {
+                _id:
+                  null,
 
-              total: {
-                $sum:
-                  "$amount"
+                total: {
+                  $sum:
+                    "$amount"
+                }
               }
             }
-          }
-        ])
-      ]);
+          ])
+        ]);
 
-    const disbursedCount =
-      circles.reduce(
-        (
-          sum,
-          c
-        ) =>
-          sum +
-          c.members.filter(
-            m =>
-              m.disbursed
-          ).length,
+      const disbursedCount =
+        circles.reduce(
+          (
+            sum,
+            c
+          ) =>
+            sum +
+            c.members.filter(
+              m =>
+                m.disbursed
+            ).length,
 
-        0
-      );
+          0
+        );
 
-    const currentMonth =
-      circle
-        ? await getCurrentMonthPayoutSummary(
+      let currentMonth = null;
+      
+      // Safely try to get current month payout summary
+      if (circle) {
+        try {
+          currentMonth = await getCurrentMonthPayoutSummary(
             circle
-          )
-        : null;
+          );
+        } catch (error) {
+          console.warn("Could not calculate payout summary:", error.message);
+          currentMonth = null;
+        }
+      }
 
-    res.json({
-      activeUsers,
+      res.json({
+        activeUsers,
 
-      disbursedCount,
+        disbursedCount,
 
-      owambeFund:
-        totals[0]
-          ?.partyTotal ||
-        0,
+        owambeFund:
+          totals[0]
+            ?.partyTotal ||
+          0,
 
-      globalSavingsPool:
-        totals[0]
-          ?.savingsTotal ||
-        0,
+        globalSavingsPool:
+          totals[0]
+            ?.savingsTotal ||
+          0,
 
-      totalPenalties:
-        (totals[0]
-          ?.penaltyTotal ||
-          0) +
-        (lateFeeTotals[0]
-          ?.total ||
-          0),
+        totalPenalties:
+          (totals[0]
+            ?.penaltyTotal ||
+            0) +
+          (lateFeeTotals[0]
+            ?.total ||
+            0),
 
-      circle:
-        circle
-          ? {
-              id:
-                circle._id,
+        circle:
+          circle
+            ? {
+                id:
+                  circle._id,
 
-              name:
-                circle.name,
+                name:
+                  circle.name,
 
-              cycleNumber:
-                circle.cycleNumber,
+                cycleNumber:
+                  circle.cycleNumber,
 
-              baselineSize:
-                circle.baselineSize,
+                baselineSize:
+                  circle.baselineSize,
 
-              recipientCount:
-                circle.recipientCount ||
-                DEFAULT_RECIPIENTS_PER_MONTH,
+                recipientCount:
+                  circle.recipientCount ||
+                  DEFAULT_RECIPIENTS_PER_MONTH,
 
-              members:
-                circle.members,
+                members:
+                  circle.members,
 
-              currentMonth:
-                currentMonth
-            }
+                currentMonth:
+                  currentMonth
+              }
 
-          : null
-    });
+            : null
+      });
+    } catch (error) {
+      console.error("Error in /metrics endpoint:", error);
+      res.status(500).json({
+        message: error.message || "Failed to load metrics"
+      });
+    }
   }
 );
 
@@ -1898,8 +2780,118 @@ router.get(
             -1
         });
 
+    const startOfMonth =
+      startOfCurrentMonth();
+
+    const ledgers =
+      await Ledger.find({
+        $or: [
+          {
+            paidAt: {
+              $gte:
+                startOfMonth
+            }
+          },
+
+          {
+            paymentClaimedAt: {
+              $gte:
+                startOfMonth
+            }
+          },
+
+          {
+            createdAt: {
+              $gte:
+                startOfMonth
+            }
+          }
+        ]
+      }).sort({
+      createdAt:
+        -1
+    });
+
+    const latestPaymentByUser =
+      new Map();
+
+    for (
+      const ledger of ledgers
+    ) {
+      const key =
+        String(
+          ledger.user
+        );
+
+      if (
+        !latestPaymentByUser.has(
+          key
+        )
+      ) {
+        latestPaymentByUser.set(
+          key,
+          ledger
+        );
+      }
+    }
+
+    const response =
+      circles.map(
+        circle => {
+          const object =
+            circle.toObject();
+
+          object.members =
+            circle.members.map(
+              member => {
+                const payment =
+                  latestPaymentByUser.get(
+                    String(
+                      member.user?._id ||
+                        member.user
+                    )
+                  );
+
+                return {
+                  ...member.toObject?.() ||
+                    member,
+
+                  paymentStatus:
+                    payment?.isPaid
+                      ? "paid"
+                      : payment?.paymentClaimStatus ===
+                          "reported"
+                      ? "reported"
+                      : payment?.paymentClaimStatus ===
+                          "rejected"
+                      ? "rejected"
+                      : "unreported",
+
+                  paymentClaimId:
+                    payment &&
+                    !payment.isPaid
+                      ? payment._id
+                      : null,
+
+                  paymentClaimedAt:
+                    payment
+                      ?.paymentClaimedAt ||
+                    null,
+
+                  paymentRejectionReason:
+                    payment
+                      ?.paymentRejectionReason ||
+                    null
+                };
+              }
+            );
+
+          return object;
+        }
+      );
+
     res.json(
-      circles
+      response
     );
   }
 );
@@ -3856,6 +4848,87 @@ router.post(
 
     await user.save();
 
+    /*
+     * If this member already had a confirmed payment report before
+     * circle assignment, convert it into the real circle ledger now.
+     */
+    const confirmedClaim =
+      await PaymentClaim.findOne({
+        user:
+          user._id,
+
+        monthKey:
+          currentMonthKey(),
+
+        status:
+          "confirmed"
+      });
+
+    if (
+      confirmedClaim
+    ) {
+      const existingLedger =
+        await Ledger.findOne({
+          user:
+            user._id,
+
+          circle:
+            circle._id,
+
+          isPaid:
+            true,
+
+          paidAt: {
+            $gte:
+              startOfCurrentMonth()
+          }
+        }).sort({
+          paidAt:
+            -1
+        });
+
+      if (!existingLedger) {
+        const monthIndex =
+          await nextLedgerMonthIndexFor(
+            user._id,
+            circle._id
+          );
+
+        await Ledger.create({
+          user:
+            user._id,
+
+          circle:
+            circle._id,
+
+          monthIndex,
+
+          savingsAmount:
+            SAVINGS_AMOUNT,
+
+          partyAmount:
+            PARTY_AMOUNT,
+
+          latePenalty:
+            0,
+
+          isPaid:
+            true,
+
+          confirmedBy:
+            confirmedClaim.confirmedBy,
+
+          paymentReference:
+            confirmedClaim.paymentReference ||
+            `CLAIM-${confirmedClaim._id}`,
+
+          paidAt:
+            confirmedClaim.confirmedAt ||
+            new Date()
+        });
+      }
+    }
+
     await Announcement.create({
       type:
         "general_update",
@@ -4243,5 +5316,72 @@ async function performBackup(
       });
   }
 }
+
+// ============================================================
+// PAYMENT WINDOW STATUS – Admin routes
+// ============================================================
+router.get('/settings/payment-reporting', async (req, res) => {
+  try {
+    const setting = await Settings.findOne({ key: 'paymentReportingOpen' });
+    res.json({ open: setting ? setting.value : true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/settings/payment-reporting', async (req, res) => {
+  try {
+    const { open } = req.body;
+    if (typeof open !== 'boolean') {
+      return res.status(400).json({ error: 'open must be boolean' });
+    }
+    const setting = await Settings.findOneAndUpdate(
+      { key: 'paymentReportingOpen' },
+      { value: open },
+      { upsert: true, new: true }
+    );
+    res.json({ open: setting.value });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// UNCONFIRM A CONFIRMED PAYMENT CLAIM (Revert to reported, no ledger needed)
+// ============================================================
+router.post("/payment-claims/:claimId/unconfirm", requireAdmin, async (req, res) => {
+  const claim = await PaymentClaim.findById(req.params.claimId);
+  if (!claim) return res.status(404).json({ message: "Payment claim not found." });
+  if (claim.status !== "confirmed") return res.status(400).json({ message: "Only confirmed claims can be unconfirmed." });
+
+  // Try to find and delete any active ledger just in case
+  const circle = await Circle.findOne({ "members.user": claim.user });
+  if (circle) {
+    const ledger = await Ledger.findOne({
+      user: claim.user,
+      circle: circle._id,
+      isPaid: true,
+      paidAt: { $gte: startOfCurrentMonth() }
+    });
+    if (ledger) {
+      await Ledger.findByIdAndDelete(ledger._id);
+    }
+  }
+
+  // Reset the claim
+  claim.status = "reported";
+  claim.confirmedAt = undefined;
+  claim.confirmedBy = undefined;
+  claim.paymentReference = undefined;
+  await claim.save();
+
+  await AdminActivity.create({
+    admin: req.auth.adminId,
+    action: "payment_claim_unconfirmed",
+    detail: `Confirmed payment claim for ${claim.user} was reverted to reported.`
+  });
+
+  res.json({ message: "Claim unconfirmed. The member can now report the payment again." });
+});
 
 export default router;

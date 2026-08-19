@@ -19,14 +19,21 @@
 // 5. Maintenance fee is separate from the payout pot and is
 //    charged to each selected recipient.
 //
-// 6. Maintenance fee scales with the size of the circle:
-//      ₦500 × ceil(circle size / 2)
+// 6. Maintenance fee per selected recipient is calculated as:
+//      ₦500 × ceil(circle size ÷ 2)
 //
 //    Examples:
-//      4 members  = ₦1,000 each
-//      5-6        = ₦1,500 each
-//      19-20      = ₦5,000 each
-//      25-26      = ₦6,500 each
+//      4 members  → ₦1,000 each
+//      5–6        → ₦1,500 each
+//      7–8        → ₦2,000 each
+//      9–10       → ₦2,500 each
+//      11–12      → ₦3,000 each
+//      13–14      → ₦3,500 each
+//      15–16      → ₦4,000 each
+//      17–18      → ₦4,500 each
+//      19–20      → ₦5,000 each
+//      25–26      → ₦6,500 each
+//      29–30      → ₦7,500 each
 //
 // 7. Net payout:
 //      gross payout - maintenance fee
@@ -106,14 +113,15 @@ export function validateRecipientCount(
 /*
  * Maintenance fee per selected recipient.
  *
- * Examples:
+ * Implementation: ₦500 × ceil(circleSize / 2)
  *
- * 4  -> ₦1,000
- * 5  -> ₦1,500
- * 6  -> ₦1,500
- * 20 -> ₦5,000
- * 25 -> ₦6,500
- * 30 -> ₦7,500
+ * Examples:
+ *   4  → ₦1,000
+ *   5  → ₦1,500
+ *   6  → ₦1,500
+ *   20 → ₦5,000
+ *   25 → ₦6,500
+ *   30 → ₦7,500
  */
 export function maintenanceFeeForCircleSize(
   circleSize

@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.uniqueyouths.thrift",
+      "sha256_cert_fingerprints": [
+        "4C:E5:41:48:F4:4A:19:B0:CA:60:DB:02:46:D2:B9:13:17:F7:7C:C2:77:53:B1:8C:59:71:AC:AA:07:B1:F3:7E"
+      ]
+    }
+  }
+]

@@ -2,6 +2,7 @@ import express from "express";
 import User from "../models/User.js";
 import Circle from "../models/Circle.js";
 import Ledger from "../models/Ledger.js";
+import PaymentClaim from "../models/PaymentClaim.js";
 import LateFee from "../models/LateFee.js";
 import Announcement from "../models/Announcement.js";
 import {
@@ -22,6 +23,11 @@ import {
   MAX_RECIPIENTS_PER_MONTH,
   maintenanceFeeForCircleSize
 } from "../utils/finance.js";
+
+// ============================================================
+// IMPORT SETTINGS MODEL (shared)
+// ============================================================
+import { Settings } from "../models/Settings.js";
 
 const router = express.Router();
 
@@ -47,6 +53,18 @@ const SUPPORT_EMAIL =
 /* ============================================================
  * CURRENT MONTH START
  * ============================================================ */
+function currentMonthKey() {
+  const start =
+    startOfCurrentMonth();
+
+  return `${start.getFullYear()}-${String(
+    start.getMonth() + 1
+  ).padStart(
+    2,
+    "0"
+  )}`;
+}
+
 function startOfCurrentMonth() {
   const start =
     new Date();
@@ -61,6 +79,18 @@ function startOfCurrentMonth() {
   );
 
   return start;
+}
+
+function currentMonthLabel() {
+  return new Intl.DateTimeFormat(
+    "en-NG",
+    {
+      month: "long",
+      year: "numeric"
+    }
+  ).format(
+    new Date()
+  );
 }
 
 /* ============================================================
@@ -593,6 +623,165 @@ router.post(
 );
 
 /* ============================================================
+ * REPORT CURRENT-MONTH PAYMENT
+ *
+ * The member only reports that the payment was made.
+ *
+ * This endpoint does NOT mark the ledger paid, so it cannot affect
+ * the savings pot or payout calculations until an administrator
+ * confirms the report.
+ * ============================================================ */
+router.post(
+  "/payment-claims/current",
+  requireMember,
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const user =
+        await User.findById(
+          req.auth.userId
+        );
+
+      if (!user) {
+        return res
+          .status(404)
+          .json({
+            message:
+              "User not found"
+          });
+      }
+
+      const monthKey =
+        currentMonthKey();
+
+      let claim =
+        await PaymentClaim.findOne({
+          user:
+            user._id,
+
+          monthKey
+        });
+
+      if (
+        claim?.status ===
+        "confirmed"
+      ) {
+        return res
+          .status(409)
+          .json({
+            message:
+              `Your ${currentMonthLabel()} contribution has already been confirmed.`,
+
+            paymentStatus:
+              "paid",
+
+            claim
+          });
+      }
+
+      if (
+        claim?.status ===
+        "reported"
+      ) {
+        return res
+          .status(409)
+          .json({
+            message:
+              `Your ${currentMonthLabel()} payment has already been reported and is waiting for administrator confirmation.`,
+
+            paymentStatus:
+              "reported",
+
+            claim
+          });
+      }
+
+      claim =
+        claim ||
+        new PaymentClaim({
+          user:
+            user._id,
+
+          monthKey,
+
+          amount:
+            MONTHLY_CONTRIBUTION
+        });
+
+      claim.amount =
+        MONTHLY_CONTRIBUTION;
+
+      claim.status =
+        "reported";
+
+      claim.reportedAt =
+        new Date();
+
+      claim.confirmedAt =
+        undefined;
+
+      claim.confirmedBy =
+        undefined;
+
+      claim.rejectedAt =
+        undefined;
+
+      claim.rejectedBy =
+        undefined;
+
+      claim.rejectionReason =
+        undefined;
+
+      await claim.save();
+
+      return res
+        .status(201)
+        .json({
+          message:
+            `Your ${currentMonthLabel()} payment has been reported. Please make sure your receipt/proof has been sent to the admin via WhatsApp. The payment will appear as confirmed only after an administrator verifies it.`,
+
+          paymentStatus:
+            "reported",
+
+          month:
+            currentMonthLabel(),
+
+          claim: {
+            _id:
+              claim._id,
+
+            monthKey:
+              claim.monthKey,
+
+            status:
+              claim.status,
+
+            reportedAt:
+              claim.reportedAt
+          }
+        });
+    } catch (
+      error
+    ) {
+      console.error(
+        "Member payment claim error:",
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          message:
+            error.message ||
+            "Unable to report your payment right now."
+        });
+    }
+  }
+);
+
+/* ============================================================
  * MEMBER DASHBOARD DATA
  * ============================================================ */
 router.get(
@@ -634,6 +823,61 @@ router.get(
             -1
         })
         .limit(12);
+
+    const currentMonth =
+      startOfCurrentMonth();
+
+    const monthKey =
+      currentMonthKey();
+
+    const paymentClaim =
+      await PaymentClaim.findOne({
+        user:
+          user._id,
+
+        monthKey
+      });
+
+    const currentMonthLedger =
+      circle
+        ? await Ledger.findOne({
+            user:
+              user._id,
+
+            circle:
+              circle._id,
+
+            isPaid:
+              true,
+
+            paidAt: {
+              $gte:
+                currentMonth
+            }
+          }).sort({
+            paidAt:
+              -1
+          })
+        : null;
+
+    const currentMonthPayment =
+      currentMonthLedger ||
+      paymentClaim ||
+      null;
+
+    const currentMonthPaymentStatus =
+      currentMonthLedger?.isPaid
+        ? "paid"
+        : paymentClaim?.status ===
+            "reported"
+        ? "reported"
+        : paymentClaim?.status ===
+            "rejected"
+        ? "rejected"
+        : paymentClaim?.status ===
+            "confirmed"
+        ? "paid"
+        : "unreported";
 
     let monthProgress =
       null;
@@ -882,6 +1126,45 @@ router.get(
        */
       currentMonthFinance,
 
+      currentMonthPayment: {
+        month:
+          currentMonthLabel(),
+
+        monthKey,
+
+        status:
+          currentMonthPaymentStatus,
+
+        ledgerId:
+          currentMonthLedger?._id ||
+          null,
+
+        claimId:
+          paymentClaim?._id ||
+          null,
+
+        claimedAt:
+          paymentClaim?.reportedAt ||
+          null,
+
+        rejectedAt:
+          paymentClaim?.rejectedAt ||
+          null,
+
+        rejectionReason:
+          paymentClaim?.rejectionReason ||
+          null,
+
+        confirmedAt:
+          currentMonthLedger?.paidAt ||
+          paymentClaim?.confirmedAt ||
+          null,
+
+        isPaid:
+          currentMonthPaymentStatus ===
+            "paid"
+      },
+
       finance: {
         monthlyContribution:
           MONTHLY_CONTRIBUTION,
@@ -907,6 +1190,7 @@ router.get(
         defaultRecipients:
           DEFAULT_RECIPIENTS_PER_MONTH,
 
+        // ✅ CORRECTED: removed the incorrect "max(3, …) × 2" formula
         maintenanceFeeFormula:
           "₦500 × ceil(circle size ÷ 2)"
       }
@@ -1594,10 +1878,23 @@ router.get(
       DEFAULT_RECIPIENTS:
         DEFAULT_RECIPIENTS_PER_MONTH,
 
+      // ✅ CORRECTED: removed the incorrect "max(3, …) × 2" formula
       MAINTENANCE_FEE_FORMULA:
         "₦500 × ceil(circle size ÷ 2)"
     });
   }
 );
+
+// ============================================================
+// PAYMENT WINDOW STATUS – read‑only for members
+// ============================================================
+router.get('/settings/payment-reporting', async (req, res) => {
+  try {
+    const setting = await Settings.findOne({ key: 'paymentReportingOpen' });
+    res.json({ open: setting ? setting.value : true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 export default router;

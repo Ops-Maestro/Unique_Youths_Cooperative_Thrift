@@ -5,3 +5,7 @@ services:
     rootDir: unique-youths-admin
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

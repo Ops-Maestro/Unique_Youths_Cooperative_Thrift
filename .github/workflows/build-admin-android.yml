@@ -1,53 +1,5 @@
 name: Build Admin Android APK
 
-# Builds the admin web app, wraps it in the Capacitor Android shell, and
-# produces a real, installable APK - then publishes it to a separate
-# GitHub Release, so there's a stable download link for the admin app.
-#
-# The admin Android project is generated during the workflow itself, so
-# Android Studio or a locally installed Android SDK is not required on the
-# development machine. GitHub Actions provides the Android build
-# environment and Gradle builds the APK.
-#
-# ---------------------------------------------------------------------
-# ONE-TIME SETUP (do this once in the GitHub repo before the first run):
-# ---------------------------------------------------------------------
-# 1. Repo Settings -> Secrets and variables -> Actions -> Variables tab
-#    - Add ADMIN_APP_URL = the public URL your admin app is deployed to
-#      (e.g. https://unique-youths-admin.onrender.com). The APK is a
-#      WebView shell pointing at this live site - it always shows whatever
-#      is currently deployed there, no separate mobile build to keep in
-#      sync.
-#
-#    - BACKEND_API_URL should already exist for the client workflow and
-#      should point to the public backend API URL.
-#
-#    - CLIENT_APP_URL should already exist if the admin web app uses it
-#      for its "View member dashboard feed" link.
-#
-# 2. (Optional but recommended) To produce a properly *signed* release APK
-#    instead of a debug-signed one, add these repo Secrets:
-#      ADMIN_ANDROID_KEYSTORE_BASE64
-#        - `base64 -w0 your-admin-release-key.keystore`
-#      ADMIN_ANDROID_KEYSTORE_PASSWORD
-#      ADMIN_ANDROID_KEY_ALIAS
-#      ADMIN_ANDROID_KEY_PASSWORD
-#
-#    Generate a separate admin keystore locally if you don't have one:
-#      keytool -genkeypair -v \
-#        -keystore admin-release.keystore \
-#        -alias uniqueyouthsadmin \
-#        -keyalg RSA -keysize 2048 -validity 10000
-#
-#    Keep that keystore file somewhere safe outside git - losing it means
-#    you can never publish an update under the same admin app identity again.
-#
-#    Without these secrets, the workflow still runs and produces a
-#    debug-signed APK, which installs and works fine for testing/sideloading
-#    - Android will just show a generic "developer" signature instead of
-#    your own.
-# ---------------------------------------------------------------------
-
 on:
   push:
     branches:
@@ -81,15 +33,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      - name: Verify Java version
+        run: java -version
 
-      - name: Install dependencies
-        run: npm install
+      - uses: android-actions/setup-android@v4
 
-      - name: Install Capacitor
-        run: |
-          npm install @capacitor/core @capacitor/android
-          npm install --save-dev @capacitor/cli
+      - name: Install dependencies (exact from lockfile)
+        run: npm ci
 
       - name: Build web app
         run: npm run build
@@ -115,8 +65,113 @@ jobs:
           export default config;
           EOF
 
-      - name: Add Android platform
-        run: npx cap add android
+      - name: Add Android platform (if not exists)
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            echo "Android platform already exists, skipping add."
+          fi
+
+      # Upgrade Gradle wrapper to 8.7 (no trailing spaces)
+      - name: Upgrade Gradle wrapper
+        working-directory: unique-youths-admin/android
+        run: |
+          sed -i 's/gradle-8.0.2-all.zip/gradle-8.7-all.zip/g' gradle/wrapper/gradle-wrapper.properties
+          # Remove any trailing spaces
+          sed -i 's/[ \t]*$//' gradle/wrapper/gradle-wrapper.properties
+
+      # Force Java 21 compatibility and resolve Kotlin duplicate class conflicts
+      - name: Force Java 21 compatibility & Kotlin alignment
+        working-directory: unique-youths-admin/android
+        run: |
+          cat > app/build.gradle <<'EOF'
+          apply plugin: 'com.android.application'
+
+          android {
+              namespace "com.uniqueyouths.admin"
+              compileSdkVersion rootProject.ext.compileSdkVersion
+              defaultConfig {
+                  applicationId "com.uniqueyouths.admin"
+                  minSdkVersion rootProject.ext.minSdkVersion
+                  targetSdkVersion rootProject.ext.targetSdkVersion
+                  versionCode 1
+                  versionName "1.0"
+                  testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+                  aaptOptions {
+                      ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+                  }
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_21
+                  targetCompatibility JavaVersion.VERSION_21
+              }
+          }
+
+          configurations.all {
+              resolutionStrategy.eachDependency { details ->
+                  if (details.requested.group == 'org.jetbrains.kotlin') {
+                      details.useVersion '1.8.10'
+                  }
+              }
+          }
+
+          repositories {
+              flatDir{
+                  dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+              }
+          }
+
+          dependencies {
+              implementation fileTree(include: ['*.jar'], dir: 'libs')
+              implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+              implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+              implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+              implementation project(':capacitor-android')
+              testImplementation "junit:junit:$junitVersion"
+              androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+              androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+              implementation project(':capacitor-cordova-android-plugins')
+          }
+
+          apply from: 'capacitor.build.gradle'
+
+          try {
+              def servicesJSON = file('google-services.json')
+              if (servicesJSON.text) {
+                  apply plugin: 'com.google.gms.google-services'
+              }
+          } catch(Exception e) {
+              logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+          }
+          EOF
+
+      # Also upgrade AGP in the root build.gradle
+      - name: Upgrade Android Gradle Plugin
+        working-directory: unique-youths-admin/android
+        run: |
+          sed -i 's/classpath '\''com.android.tools.build:gradle:8.0.0'\''/classpath '\''com.android.tools.build:gradle:8.6.1'\''/g' build.gradle
+
+      # Upgrade SDK versions in variables.gradle
+      - name: Upgrade SDK versions
+        working-directory: unique-youths-admin/android
+        run: |
+          sed -i 's/compileSdkVersion = 33/compileSdkVersion = 35/g' variables.gradle
+          sed -i 's/targetSdkVersion = 33/targetSdkVersion = 35/g' variables.gradle
+
+      - name: Copy icon for asset generation
+        run: |
+          mkdir -p assets
+          cp public/assets/icon.png assets/icon.png
+
+      - name: Generate Android assets
+        run: npx capacitor-assets generate
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
@@ -138,7 +193,7 @@ jobs:
         if: steps.signing.outputs.has_keystore == 'true'
         working-directory: unique-youths-admin/android
         run: |
-          ./gradlew assembleRelease \
+          ./gradlew --no-daemon assembleRelease \
             -Pandroid.injected.signing.store.file="$PWD/app/release.keystore" \
             -Pandroid.injected.signing.store.password="${{ secrets.ADMIN_ANDROID_KEYSTORE_PASSWORD }}" \
             -Pandroid.injected.signing.key.alias="${{ secrets.ADMIN_ANDROID_KEY_ALIAS }}" \
@@ -150,8 +205,8 @@ jobs:
         if: steps.signing.outputs.has_keystore == 'false'
         working-directory: unique-youths-admin/android
         run: |
-          echo "::warning::No ADMIN_ANDROID_KEYSTORE_BASE64 secret set - building a debug-signed APK instead of a release-signed one. See the comment at the top of this workflow file for how to add proper signing."
-          ./gradlew assembleDebug
+          echo "::warning::No signing secrets set – building debug-signed APK."
+          ./gradlew --no-daemon assembleDebug
           mkdir -p ../apk-output
           cp app/build/outputs/apk/debug/app-debug.apk ../apk-output/unique-youths-admin.apk
 
@@ -176,7 +231,7 @@ jobs:
         with:
           tag_name: latest-admin-android
           name: Latest Admin Android build
-          body: Automatically built from the latest master branch. Downloaded via the admin app download link.
+          body: Automatically built from the latest master branch.
           prerelease: false
           files: unique-youths-admin/apk-output/unique-youths-admin.apk
         env:
