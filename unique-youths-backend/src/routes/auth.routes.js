@@ -936,7 +936,7 @@ router.post(
 );
 
 /* ============================================================
- * MEMBER LOGIN
+ * MEMBER LOGIN (FIXED)
  * ============================================================ */
 
 router.post(
@@ -1025,6 +1025,19 @@ router.post(
           });
       }
 
+      // ✅ Block incomplete registrations
+      if (
+        user.registrationStatus ===
+        "pending_otp"
+      ) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Please complete your registration before logging in."
+          });
+      }
+
       if (
         user.registrationStatus ===
         "rejected"
@@ -1075,15 +1088,6 @@ router.post(
 
 /* ============================================================
  * MEMBER CHANGE PASSWORD
- *
- * Requires an authenticated member session.
- *
- * Security rules:
- * - Current password must be supplied.
- * - New password must be at least 8 characters.
- * - New password must match confirmation.
- * - New password cannot be the same as the old password.
- * - New password is always hashed before storage.
  * ============================================================ */
 
 router.post(
@@ -1870,7 +1874,7 @@ router.post(
 );
 
 /* ============================================================
- * PASSKEY LOGIN VERIFICATION
+ * PASSKEY LOGIN VERIFICATION (FIXED)
  * ============================================================ */
 
 router.post(
@@ -1923,6 +1927,19 @@ router.post(
           .json({
             message:
               "Please verify your email before using biometric login."
+          });
+      }
+
+      // ✅ Block incomplete registrations for passkey login too
+      if (
+        user.registrationStatus ===
+        "pending_otp"
+      ) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Please complete your registration before logging in with biometrics."
           });
       }
 
